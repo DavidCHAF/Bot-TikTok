@@ -8,6 +8,11 @@ def download_video(url: str, output_dir: str) -> str:
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
+    # Résolution absolue du chemin vers cookies.txt pour éviter les erreurs de dossier courant
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    cookie_path = os.path.join(project_root, 'cookies.txt')
+    
     ydl_opts = {
         # Permet de fusionner la meilleure vidéo et le meilleur audio (souvent séparés sur les Shorts)
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
@@ -15,8 +20,8 @@ def download_video(url: str, output_dir: str) -> str:
         'quiet': False, # Changé à False pour voir les logs d'erreurs en cas de problème
         'verbose': True, # Permet de diagnostiquer si Deno est bien détecté
         
-        # Utilisation du fichier cookies exporté manuellement
-        'cookiefile': 'cookies.txt'
+        # Utilisation du fichier cookies exporté manuellement (chemin absolu)
+        'cookiefile': cookie_path
     }
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
