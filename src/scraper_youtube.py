@@ -2,10 +2,10 @@ import os
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-def scrape_youtube_shorts(niche: str, max_videos: int = 500) -> list:
+def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -> list:
     """
     Fonction pour scraper YouTube Shorts via l'API Officielle Google (YouTube Data API v3).
-    Récupère jusqu'à max_videos vidéos récentes pour un hashtag donné.
+    Récupère jusqu'à max_videos vidéos récentes pour un hashtag donné (avec filtre de langue optionnel).
     """
     api_key = os.getenv("YOUTUBE_API_KEY")
     if not api_key:
@@ -23,15 +23,21 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500) -> list:
     try:
         while len(videos) < max_videos:
             # 1. Étape Recherche (Search)
-            search_response = youtube.search().list(
-                q=query,
-                part="id,snippet",
-                type="video",
-                videoDuration="short", # Filtre officiel pour les vidéos < 4 min
-                order="date",          # Tri strict par date d'ajout (le plus récent d'abord)
-                maxResults=50,         # Maximum autorisé par page
-                pageToken=next_page_token
-            ).execute()
+            search_params = {
+                "q": query,
+                "part": "id,snippet",
+                "type": "video",
+                "videoDuration": "short", # Filtre officiel pour les vidéos < 4 min
+                "order": "date",          # Tri strict par date d'ajout
+                "maxResults": 50,
+                "pageToken": next_page_token
+            }
+            
+            # Injection de la langue si spécifiée
+            if lang:
+                search_params["relevanceLanguage"] = lang
+                
+            search_response = youtube.search().list(**search_params).execute()
             
             search_items = search_response.get("items", [])
             if not search_items:
