@@ -1,27 +1,49 @@
 import os
 import random
 import ffmpeg
-from pytubefix import YouTube
+import requests
 
 def download_video(url: str, output_dir: str) -> str:
-    """Télécharge une vidéo depuis une URL via pytubefix (contourne les blocages Cloud)."""
+    """Télécharge une vidéo via l'API publique Cobalt (contournement ULTIME des blocages Cloud)."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
-    # pytubefix utilise automatiquement Deno (qui est installé) pour générer un PO-Token et esquiver le blocage !
     try:
-        yt = YouTube(url, client='WEB')
-        video_id = yt.video_id
+        video_id = url.split('/')[-1].split('?')[0]
+        out_path = os.path.join(output_dir, f"{video_id}.mp4")
         
-        # Récupère le meilleur flux qui a l'image ET le son (parfait pour TikTok)
-        stream = yt.streams.get_highest_resolution()
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "url": url,
+            "vCodec": "h264" # Format idéal pour TikTok/FFmpeg
+        }
         
-        # Télécharge la vidéo
-        out_path = stream.download(output_path=output_dir, filename=f"{video_id}.mp4")
+        # 1. Demande à l'API de récupérer la vidéo à notre place
+        r = requests.post("https://co.wuk.sh/api/json", headers=headers, json=data, timeout=15)
+        r.raise_for_status()
+        res = r.json()
+        
+        # 2. Cobalt nous renvoie le lien direct MP4
+        download_url = res.get("url")
+        if not download_url:
+            print("Erreur : Cobalt n'a pas renvoyé de lien.")
+            return ""
+            
+        # 3. On télécharge le fichier
+        r_vid = requests.get(download_url, stream=True, timeout=30)
+        r_vid.raise_for_status()
+        
+        with open(out_path, 'wb') as f:
+            for chunk in r_vid.iter_content(chunk_size=8192):
+                f.write(chunk)
+                
         return out_path
         
     except Exception as e:
-        print(f"Erreur pytubefix sur {url} : {e}")
+        print(f"Erreur API Cobalt sur {url} : {e}")
         return ""
 
 def process_video(input_path: str, output_path: str) -> bool:
