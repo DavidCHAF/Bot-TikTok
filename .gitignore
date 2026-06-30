@@ -17,3 +17,6 @@ sourcing_*.csv
 # Fichiers OS
 .DS_Store
 Thumbs.db
+
+# Fichiers de sécurité / Auth
+cookies.txt

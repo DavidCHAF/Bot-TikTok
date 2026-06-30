@@ -9,7 +9,8 @@ def download_video(url: str, output_dir: str) -> str:
         os.makedirs(output_dir)
         
     ydl_opts = {
-        'format': 'best',
+        # Permet de fusionner la meilleure vidéo et le meilleur audio (souvent séparés sur les Shorts)
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
         'quiet': True,
         'extractor_args': {'youtube': ['player_client=android,web']},
