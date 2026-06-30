@@ -14,34 +14,26 @@ def download_video(url: str, output_dir: str) -> str:
         
         headers = {
             "Accept": "application/json",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Origin": "https://cobalt.tools",
+            "Referer": "https://cobalt.tools/"
         }
         data = {
             "url": url,
             "vCodec": "h264" # Format idéal pour TikTok/FFmpeg
         }
         
-        # Liste d'instances publiques Cobalt 100% fiables (sans wuk.sh qui a crashé)
-        instances = [
-            "https://cobalt.q-n-d.de/api/json",
-            "https://cobalt.api.zmatey.ru/api/json",
-            "https://api.cobalt.tools/api/json"
-        ]
+        # On utilise UNIQUEMENT l'instance officielle (Cloudflare) car Oracle bloque les DNS exotiques
+        api_url = "https://api.cobalt.tools/"
         
-        res = None
-        for api_url in instances:
-            try:
-                # 1. Demande à l'API de récupérer la vidéo
-                r = requests.post(api_url, headers=headers, json=data, timeout=15)
-                if r.status_code == 200:
-                    res = r.json()
-                    break # Succès, on sort de la boucle
-            except Exception as e:
-                print(f"Échec sur {api_url}: {e}")
-                continue # On tente l'instance suivante
-                
-        if not res:
-            print("Erreur : Toutes les instances Cobalt sont inaccessibles.")
+        try:
+            # 1. Demande à l'API de récupérer la vidéo
+            r = requests.post(api_url, headers=headers, json=data, timeout=15)
+            r.raise_for_status()
+            res = r.json()
+        except Exception as e:
+            print(f"Échec critique sur {api_url}: {e} | Réponse: {r.text if 'r' in locals() else 'Aucune'}")
             return ""
             
         # 2. Cobalt nous renvoie le lien direct MP4
