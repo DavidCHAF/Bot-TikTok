@@ -1,28 +1,33 @@
 import os
 import random
+import yt_dlp
 import ffmpeg
-from pytubefix import YouTube
 
 def download_video(url: str, output_dir: str) -> str:
-    """Télécharge une vidéo via pytubefix avec génération automatique de PO-Token via Node.js."""
+    """Télécharge une vidéo via yt-dlp avec un VRAI fichier cookies.txt."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    cookie_path = os.path.join(project_root, 'cookies.txt')
+    
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
+        'quiet': False,
+        'verbose': True,
+        'cookiefile': cookie_path
+    }
+    
     try:
-        # Le client WEB est le seul qui déclenche la génération du PO-Token dans pytubefix
-        yt = YouTube(url, client='WEB')
-        video_id = yt.video_id
-        
-        # Récupère le flux vidéo+audio en 720p ou 360p
-        stream = yt.streams.get_highest_resolution()
-        if not stream:
-            raise Exception("Aucun flux vidéo trouvé.")
-            
-        out_path = stream.download(output_path=output_dir, filename=f"{video_id}.mp4")
-        return out_path
-        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(url, download=True)
+            video_id = info_dict.get('id', 'video')
+            ext = info_dict.get('ext', 'mp4')
+            return os.path.join(output_dir, f"{video_id}.{ext}")
     except Exception as e:
-        print(f"Erreur Pytubefix sur {url} : {e}")
+        print(f"Erreur yt-dlp avec cookies sur {url} : {e}")
         return ""
 
 def process_video(input_path: str, output_path: str) -> bool:
