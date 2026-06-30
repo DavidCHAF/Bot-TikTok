@@ -3,8 +3,8 @@ import asyncio
 import csv
 import time
 import glob
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 
 from src.scraper_youtube import scrape_youtube_shorts, get_youtube_stats
 from src.analyzer import get_top_trends
@@ -229,8 +229,42 @@ async def auto_t2_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not os.path.exists(csv_filename):
         return
     
-    await context.bot.send_message(chat_id=chat_id, text=f"⏰ 3 heures se sont écoulées ! Lancement automatique de T2 pour '{niche}'.")
-    await execute_t2_logic(context, chat_id, niche)
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Valider (Lancer T2)", callback_data=f"t2_yes|{niche}"),
+            InlineKeyboardButton("❌ Non (Annuler)", callback_data=f"t2_no|{niche}")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await context.bot.send_message(
+        chat_id=chat_id, 
+        text=f"⏰ 3 heures se sont écoulées pour '{niche}' !\nLe T2 est prêt. Veux-tu lancer l'analyse et télécharger les vidéos maintenant ?",
+        reply_markup=reply_markup
+    )
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles inline button clicks."""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    chat_id = query.message.chat_id
+    
+    if data.startswith("t2_yes|"):
+        niche = data.split("|")[1]
+        await query.edit_message_text(text=f"✅ Lancement T2 confirmé pour '{niche}'.")
+        await execute_t2_logic(context, chat_id, niche)
+        
+    elif data.startswith("t2_no|"):
+        niche = data.split("|")[1]
+        await query.edit_message_text(text=f"❌ Analyse annulée pour '{niche}'. Le fichier de suivi a été supprimé.")
+        file = f"sourcing_yt_{niche}.csv"
+        if os.path.exists(file):
+            try:
+                os.remove(file)
+            except Exception:
+                pass
 
 async def yt_t2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Manual command to run T2."""
@@ -251,6 +285,7 @@ def main() -> None:
     application.add_handler(CommandHandler("yt_t2", yt_t2))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("clear", clear_command))
+    application.add_handler(CallbackQueryHandler(button_callback))
 
     print("🤖 Bot démarré. En attente de messages...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
