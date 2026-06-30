@@ -13,10 +13,7 @@ def download_video(url: str, output_dir: str) -> str:
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
         'quiet': False, # Changé à False pour voir les logs d'erreurs en cas de problème
-        'verbose': True, # Permet de diagnostiquer si Node est bien détecté
-        
-        # ACTIVER NODE.JS : Requis pour résoudre l'énigme "n challenge" sur YouTube
-        'js_runtimes': {'node': {}},
+        'verbose': True, # Permet de diagnostiquer si Deno est bien détecté
         
         # Utilisation du fichier cookies exporté manuellement
         'cookiefile': 'cookies.txt'
