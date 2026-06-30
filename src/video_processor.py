@@ -1,87 +1,28 @@
 import os
 import random
 import ffmpeg
-import requests
-import socket
-
-# --- HACK ANTI-CENSURE ORACLE DNS ---
-# Oracle Cloud bloque la résolution DNS des domaines .de, .ru, .sh, .rocks
-# On force Python à utiliser le DNS de Google (DoH) pour trouver l'adresse IP de nos serveurs.
-old_getaddrinfo = socket.getaddrinfo
-
-def custom_dns_resolver(*args, **kwargs):
-    host = args[0]
-    if host in ['cobalt.q-n-d.de', 'co.wuk.sh', 'cobalt.api.zmatey.ru']:
-        try:
-            # On demande l'IP directement à Google
-            r = requests.get(f"https://dns.google/resolve?name={host}&type=A", timeout=5)
-            ip = r.json()['Answer'][0]['data']
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ip, args[1] if len(args)>1 else 443))]
-        except Exception as e:
-            pass
-    return old_getaddrinfo(*args, **kwargs)
-
-# On applique le patch réseau
-socket.getaddrinfo = custom_dns_resolver
-# ------------------------------------
+from pytubefix import YouTube
 
 def download_video(url: str, output_dir: str) -> str:
-    """Télécharge une vidéo via l'API publique Cobalt (avec DNS anti-censure)."""
+    """Télécharge une vidéo via pytubefix avec génération automatique de PO-Token via Node.js."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
     try:
-        video_id = url.split('/')[-1].split('?')[0]
-        out_path = os.path.join(output_dir, f"{video_id}.mp4")
+        # Le client WEB est le seul qui déclenche la génération du PO-Token dans pytubefix
+        yt = YouTube(url, client='WEB')
+        video_id = yt.video_id
         
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "url": url,
-            "vCodec": "h264"
-        }
-        
-        # Nos instances de secours fiables
-        instances = [
-            "https://co.wuk.sh/api/json",
-            "https://cobalt.q-n-d.de/api/json"
-        ]
-        
-        res = None
-        for api_url in instances:
-            try:
-                # 1. Requête API (le DNS passera par Google automatiquement grâce au patch)
-                r = requests.post(api_url, headers=headers, json=data, timeout=15)
-                if r.status_code == 200:
-                    res = r.json()
-                    break
-            except Exception as e:
-                print(f"Échec {api_url} : {e}")
-                continue
-                
-        if not res:
-            print("Erreur : Impossible de joindre les serveurs Cobalt malgré le patch DNS.")
-            return ""
+        # Récupère le flux vidéo+audio en 720p ou 360p
+        stream = yt.streams.get_highest_resolution()
+        if not stream:
+            raise Exception("Aucun flux vidéo trouvé.")
             
-        # 2. Téléchargement du MP4
-        download_url = res.get("url")
-        if not download_url:
-            print("Erreur : Cobalt n'a pas renvoyé de lien MP4.")
-            return ""
-            
-        r_vid = requests.get(download_url, stream=True, timeout=30)
-        r_vid.raise_for_status()
-        
-        with open(out_path, 'wb') as f:
-            for chunk in r_vid.iter_content(chunk_size=8192):
-                f.write(chunk)
-                
+        out_path = stream.download(output_path=output_dir, filename=f"{video_id}.mp4")
         return out_path
         
     except Exception as e:
-        print(f"Erreur globale Cobalt : {e}")
+        print(f"Erreur Pytubefix sur {url} : {e}")
         return ""
 
 def process_video(input_path: str, output_path: str) -> bool:
