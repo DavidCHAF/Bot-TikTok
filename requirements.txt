@@ -1,0 +1,6 @@
+python-telegram-bot[job-queue]==21.1.1
+yt-dlp==2024.5.27
+ffmpeg-python==0.2.0
+pytest==8.2.2
+requests==2.32.3
+google-api-python-client==2.133.0

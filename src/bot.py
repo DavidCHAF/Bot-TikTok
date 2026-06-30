@@ -1,0 +1,186 @@
+import os
+import asyncio
+import csv
+import time
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+
+from src.scraper_youtube import scrape_youtube_shorts, get_youtube_stats
+from src.analyzer import get_top_trends
+from src.video_processor import download_video, process_video
+
+# Token via environment variable
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a message when the command /help is issued."""
+    await update.message.reply_text(
+        "🛠 **Liste des commandes du Bot :**\n\n"
+        "🔹 `/yt_t1 <niche>` : Sourcing initial. Récupère les Shorts de la niche et démarre le timer de 3h.\n"
+        "🔹 `/yt_t2 <niche>` : Analyse manuelle. Force le calcul de vélocité, le téléchargement et le rendu FFmpeg tout de suite.\n"
+        "🔹 `/help` : Affiche ce message d'aide."
+    )
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a message when the command /start is issued."""
+    await update.message.reply_text(
+        "👋 Bienvenue sur le Bot Faceless Trend Predictor!\n\n"
+        "Tape /help pour voir toutes les commandes disponibles."
+    )
+
+async def yt_t1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run real T1 sourcing for YouTube Shorts."""
+    args = context.args
+    niche = args[0] if args else "général"
+    chat_id = update.effective_chat.id
+    
+    await context.bot.send_message(chat_id=chat_id, text=f"🔍 Début du sourcing YouTube T1 pour '{niche}'... Patientez.")
+    
+    try:
+        videos = await asyncio.to_thread(scrape_youtube_shorts, niche, 500)
+        
+        if not videos:
+            await context.bot.send_message(chat_id=chat_id, text="❌ Aucune vidéo trouvée ou erreur API.")
+            return
+            
+        csv_filename = f"sourcing_yt_{niche}.csv"
+        # Ajout d'une colonne de timestamp T1 global dans le fichier
+        current_time = time.time()
+        for v in videos:
+            v['t1_timestamp'] = current_time
+            
+        with open(csv_filename, mode='w', newline='', encoding='utf-8') as file:
+            writer = csv.DictWriter(file, fieldnames=["id", "url", "title", "views", "likes", "comments", "shares", "create_time", "t1_timestamp"])
+            writer.writeheader()
+            writer.writerows(videos)
+            
+        summary = "\n".join([f"- {v['title'][:30]}... ({v['views']} vues)" for v in videos[:3]])
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ Sourcing YouTube T1 terminé pour '{niche}'. {len(videos)} vidéos récupérées.\n\n"
+                 f"Top 3 actuels :\n{summary}\n\n"
+                 "⏳ Compte à rebours de 3 heures (10800s) lancé. Je lancerai automatiquement T2 à la fin !"
+        )
+        
+        with open(csv_filename, 'rb') as doc:
+            await context.bot.send_document(chat_id=chat_id, document=doc, filename=csv_filename, caption="Voici l'export CSV complet T1.")
+        
+        # Programmation du T2 automatique dans 3 heures (10800 secondes)
+        context.job_queue.run_once(auto_t2_job, 10800, data={'chat_id': chat_id, 'niche': niche})
+    except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Erreur lors du scraping : {e}")
+
+async def execute_t2_logic(context: ContextTypes.DEFAULT_TYPE, chat_id: int, niche: str) -> None:
+    """Core logic for T2 analysis, can be called manually or automatically."""
+    csv_filename = f"sourcing_yt_{niche}.csv"
+    
+    if not os.path.exists(csv_filename):
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Fichier {csv_filename} introuvable. Lancez /yt_t1 d'abord.")
+        return
+        
+    await context.bot.send_message(chat_id=chat_id, text=f"🔍 Lancement de l'analyse T2 (Vélocité) pour '{niche}'...")
+    
+    try:
+        # 1. Lire T1
+        data_t1 = []
+        with open(csv_filename, mode='r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                data_t1.append(row)
+                
+        if not data_t1:
+            await context.bot.send_message(chat_id=chat_id, text="❌ Le fichier CSV est vide.")
+            return
+            
+        t1_timestamp = float(data_t1[0].get('t1_timestamp', time.time() - 10800))
+        delta_t_hours = (time.time() - t1_timestamp) / 3600.0
+        if delta_t_hours <= 0:
+            delta_t_hours = 0.01 # Eviter division par 0
+            
+        # 2. Récupérer T2
+        video_ids = [item['id'] for item in data_t1]
+        data_t2 = await asyncio.to_thread(get_youtube_stats, video_ids)
+        
+        # 3. Analyser
+        # Les seuils par défaut (Croissance > 2% et Vélocité > 50 vues/h) sont appliqués.
+        top_trends = get_top_trends(data_t1, data_t2, delta_t_hours=delta_t_hours)
+        
+        if not top_trends:
+            await context.bot.send_message(chat_id=chat_id, text="❌ Aucune vidéo n'a passé les critères stricts de vélocité.")
+            return
+            
+        # Sécurité : On limite le traitement aux 10 meilleures pour ne pas saturer le serveur/Telegram
+        trends_to_process = top_trends[:10]
+            
+        msg = f"🏆 Analyse T2 terminée ! (Delta: {delta_t_hours:.2f}h)\n\n"
+        msg += f"🔥 {len(trends_to_process)} vidéos ont explosé les compteurs :\n\n"
+        for i, t in enumerate(trends_to_process):
+            msg += f"Top {i+1}: {t['title'][:20]}...\n"
+            msg += f"Vues: {t['views_t1']} -> {t['views_t2']} (+{t['delta_v']})\n"
+            msg += f"Vélocité horaire: {t['v_h']:.0f} vues/h\n"
+            msg += f"Croissance relative: {t['c_r']:.1f}%\n"
+            msg += f"Score Pondéré: {t['score']:.1f}\n\n"
+            
+        await context.bot.send_message(chat_id=chat_id, text=msg)
+        await context.bot.send_message(chat_id=chat_id, text=f"📥 Lancement du téléchargement et FFmpeg pour {len(trends_to_process)} vidéos...")
+        
+        # 4. Traitement Vidéo
+        output_dir = "downloads"
+        for i, trend in enumerate(trends_to_process):
+            vid_url = trend['url']
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=f"⏳ Téléchargement du Top {i+1}...")
+                input_video = await asyncio.to_thread(download_video, vid_url, output_dir)
+                
+                output_video = os.path.join(output_dir, f"processed_top{i+1}_{trend['id']}.mp4")
+                await context.bot.send_message(chat_id=chat_id, text=f"🎨 Traitement FFmpeg du Top {i+1}...")
+                success = await asyncio.to_thread(process_video, input_video, output_video)
+                
+                if success and os.path.exists(output_video):
+                    with open(output_video, 'rb') as video_file:
+                        await context.bot.send_video(
+                            chat_id=chat_id, 
+                            video=video_file, 
+                            caption=f"🎬 Voici ton Top {i+1} ({trend['c_r']:.1f}% croissance)"
+                        )
+                else:
+                    await context.bot.send_message(chat_id=chat_id, text=f"❌ Echec du traitement FFmpeg pour le Top {i+1}.")
+                    
+            except Exception as e:
+                await context.bot.send_message(chat_id=chat_id, text=f"❌ Erreur vidéo Top {i+1}: {e}")
+
+    except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Erreur critique lors de T2 : {e}")
+
+async def auto_t2_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback for the JobQueue to run T2 automatically after 3 hours."""
+    job = context.job
+    chat_id = job.data['chat_id']
+    niche = job.data['niche']
+    
+    await context.bot.send_message(chat_id=chat_id, text=f"⏰ 3 heures se sont écoulées ! Lancement automatique de T2 pour '{niche}'.")
+    await execute_t2_logic(context, chat_id, niche)
+
+async def yt_t2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Manual command to run T2."""
+    args = context.args
+    niche = args[0] if args else "général"
+    await execute_t2_logic(context, update.effective_chat.id, niche)
+
+def main() -> None:
+    """Run the bot."""
+    if TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
+        print("⚠️ Attention: Token Telegram non configuré (utilisez TELEGRAM_BOT_TOKEN).")
+        
+    application = Application.builder().token(TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("yt_t1", yt_t1))
+    application.add_handler(CommandHandler("yt_t2", yt_t2))
+
+    print("🤖 Bot démarré. En attente de messages...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()

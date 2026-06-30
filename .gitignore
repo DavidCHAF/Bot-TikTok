@@ -1,0 +1,19 @@
+# Environnement virtuel Python
+venv/
+env/
+.env
+
+# Fichiers compilés Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Données générées par le bot (très important de ne pas push ça !)
+*.csv
+downloads/
+sourcing_*.csv
+
+# Fichiers OS
+.DS_Store
+Thumbs.db
