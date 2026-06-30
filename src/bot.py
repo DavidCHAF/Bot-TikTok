@@ -17,9 +17,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """Send a message when the command /help is issued."""
     await update.message.reply_text(
         "🛠 **Liste des commandes du Bot :**\n\n"
-        "🔹 `/yt_t1 <niche> [langue]` : Sourcing initial. Récupère les Shorts et lance le timer. (ex: `/yt_t1 #business fr`)\n"
+        "🔹 `/yt_t1 <niche> [langue-region]` : Sourcing initial. (ex: `/yt_t1 #business fr` ou `/yt_t1 #business en-US` ou `en-GB`)\n"
         "🔹 `/yt_t2 <niche>` : Analyse manuelle T2. Force le calcul et le téléchargement.\n"
         "🔹 `/status` : Affiche le tableau de bord de tous tes lancements en cours.\n"
+        "🔹 `/clear <niche>|all` : Annule un ou tous les lancements en cours (ex: `/clear #business` ou `/clear all`).\n"
         "🔹 `/help` : Affiche ce message d'aide."
     )
 
@@ -104,6 +105,38 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             msg += f"⚠️ `{niche}` : Fichier illisible.\n"
             
     await update.message.reply_text(msg)
+
+async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Clear ongoing T1 sourcing tasks."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("❌ Précise ce que tu veux effacer : `/clear all` ou `/clear <niche>`.")
+        return
+        
+    target = args[0]
+    chat_id = update.effective_chat.id
+    
+    if target.lower() == "all":
+        files = glob.glob("sourcing_yt_*.csv")
+        if not files:
+            await context.bot.send_message(chat_id=chat_id, text="📭 Aucun lancement en cours à effacer.")
+            return
+        for file in files:
+            try:
+                os.remove(file)
+            except Exception:
+                pass
+        await context.bot.send_message(chat_id=chat_id, text=f"🗑️ Tous les lancements en cours ({len(files)}) ont été annulés et effacés.")
+    else:
+        file = f"sourcing_yt_{target}.csv"
+        if os.path.exists(file):
+            try:
+                os.remove(file)
+                await context.bot.send_message(chat_id=chat_id, text=f"🗑️ Le lancement en cours pour '{target}' a été annulé et effacé.")
+            except Exception as e:
+                await context.bot.send_message(chat_id=chat_id, text=f"❌ Erreur lors de la suppression : {e}")
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ Aucun lancement en cours trouvé pour '{target}'.")
 
 async def execute_t2_logic(context: ContextTypes.DEFAULT_TYPE, chat_id: int, niche: str) -> None:
     """Core logic for T2 analysis."""
@@ -191,6 +224,11 @@ async def auto_t2_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = job.data['chat_id']
     niche = job.data['niche']
     
+    # Si le fichier CSV n'existe plus (ex: supprimé via /clear), on annule silencieusement
+    csv_filename = f"sourcing_yt_{niche}.csv"
+    if not os.path.exists(csv_filename):
+        return
+    
     await context.bot.send_message(chat_id=chat_id, text=f"⏰ 3 heures se sont écoulées ! Lancement automatique de T2 pour '{niche}'.")
     await execute_t2_logic(context, chat_id, niche)
 
@@ -212,6 +250,7 @@ def main() -> None:
     application.add_handler(CommandHandler("yt_t1", yt_t1))
     application.add_handler(CommandHandler("yt_t2", yt_t2))
     application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("clear", clear_command))
 
     print("🤖 Bot démarré. En attente de messages...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

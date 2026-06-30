@@ -50,10 +50,15 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
             
             # Injection de la langue si spécifiée
             if lang:
-                search_params["relevanceLanguage"] = lang
-                # Si l'utilisateur demande de l'anglais, on force la région US pour éviter l'Inde/Asie
-                if lang.lower() == 'en':
-                    search_params["regionCode"] = "US"
+                if "-" in lang:
+                    language, region = lang.split("-", 1)
+                    search_params["relevanceLanguage"] = language
+                    search_params["regionCode"] = region.upper()
+                else:
+                    search_params["relevanceLanguage"] = lang
+                    # Si l'utilisateur demande juste de l'anglais, on force la région US par défaut
+                    if lang.lower() == 'en':
+                        search_params["regionCode"] = "US"
                 
             search_response = youtube.search().list(**search_params).execute()
             
