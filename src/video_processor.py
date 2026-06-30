@@ -21,11 +21,28 @@ def download_video(url: str, output_dir: str) -> str:
             "vCodec": "h264" # Format idéal pour TikTok/FFmpeg
         }
         
-        # 1. Demande à l'API de récupérer la vidéo à notre place
-        r = requests.post("https://co.wuk.sh/api/json", headers=headers, json=data, timeout=15)
-        r.raise_for_status()
-        res = r.json()
+        # Liste d'instances publiques Cobalt (sécurité si l'une d'elles est hors ligne)
+        instances = [
+            "https://api.cobalt.tools/api/json",
+            "https://cobalt.q-n-d.de/api/json",
+            "https://cobalt.api.zmatey.ru/api/json"
+        ]
         
+        res = None
+        for api_url in instances:
+            try:
+                # 1. Demande à l'API de récupérer la vidéo
+                r = requests.post(api_url, headers=headers, json=data, timeout=15)
+                if r.status_code == 200:
+                    res = r.json()
+                    break # Succès, on sort de la boucle
+            except Exception:
+                continue # On tente l'instance suivante
+                
+        if not res:
+            print("Erreur : Toutes les instances Cobalt sont inaccessibles.")
+            return ""
+            
         # 2. Cobalt nous renvoie le lien direct MP4
         download_url = res.get("url")
         if not download_url:
