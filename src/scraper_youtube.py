@@ -1,6 +1,21 @@
 import os
+import re
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
+def is_western_content(text: str) -> bool:
+    """
+    Vérifie si le texte contient des caractères d'alphabets non-occidentaux.
+    Retourne False si on détecte du Cyrillique, Arabe, Hindi, Thaï, Chinois, etc.
+    """
+    if not text:
+        return True
+    
+    # Plages Unicode blacklistées : Cyrillique, Arabe, Devanagari, Bengali, Thaï, CJK (Asie)
+    forbidden_pattern = re.compile(
+        r'[\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0980-\u09FF\u0E00-\u0E7F\u4E00-\u9FFF\u3040-\u30FF\u3130-\u318F\uAC00-\uD7AF]'
+    )
+    return not bool(forbidden_pattern.search(text))
 
 def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -> list:
     """
@@ -36,6 +51,9 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
             # Injection de la langue si spécifiée
             if lang:
                 search_params["relevanceLanguage"] = lang
+                # Si l'utilisateur demande de l'anglais, on force la région US pour éviter l'Inde/Asie
+                if lang.lower() == 'en':
+                    search_params["regionCode"] = "US"
                 
             search_response = youtube.search().list(**search_params).execute()
             
@@ -58,11 +76,17 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
             for stat in stats_items:
                 stats = stat.get("statistics", {})
                 snippet = stat.get("snippet", {})
+                title = snippet.get("title", "")
+                description = snippet.get("description", "")
+                
+                # Filtrage : On exclut les vidéos dont le titre ou la description contient des scripts asiatiques/indiens/arabes/russes
+                if not is_western_content(title) or not is_western_content(description):
+                    continue
                 
                 videos.append({
                     "id": stat["id"],
                     "url": f"https://www.youtube.com/shorts/{stat['id']}",
-                    "title": snippet.get("title", ""),
+                    "title": title,
                     "views": int(stats.get("viewCount", 0)),
                     "likes": int(stats.get("likeCount", 0)),
                     "comments": int(stats.get("commentCount", 0)),
