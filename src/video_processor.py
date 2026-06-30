@@ -12,7 +12,12 @@ def download_video(url: str, output_dir: str) -> str:
         # Permet de fusionner la meilleure vidéo et le meilleur audio (souvent séparés sur les Shorts)
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
-        'quiet': True,
+        'quiet': False, # Changé à False pour voir les logs d'erreurs en cas de problème
+        'verbose': True, # Permet de diagnostiquer si Node est bien détecté
+        
+        # ACTIVER NODE.JS : Requis pour résoudre l'énigme "n challenge" sur YouTube
+        'js_runtimes': {'node': {}},
+        
         # L'API iOS de YouTube ne demande généralement pas le fameux "n challenge" Javascript
         'extractor_args': {'youtube': ['player_client=ios']},
         # Utilisation du fichier cookies exporté manuellement
