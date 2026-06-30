@@ -1,34 +1,28 @@
 import os
 import random
-import yt_dlp
 import ffmpeg
+from pytubefix import YouTube
 
 def download_video(url: str, output_dir: str) -> str:
-    """Télécharge une vidéo depuis une URL via yt-dlp."""
+    """Télécharge une vidéo depuis une URL via pytubefix (contourne les blocages Cloud)."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
-    # Résolution absolue du chemin vers cookies.txt pour éviter les erreurs de dossier courant
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_dir)
-    cookie_path = os.path.join(project_root, 'cookies.txt')
-    
-    ydl_opts = {
-        # Permet de fusionner la meilleure vidéo et le meilleur audio (souvent séparés sur les Shorts)
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
-        'quiet': False, # Changé à False pour voir les logs d'erreurs en cas de problème
-        'verbose': True, # Permet de diagnostiquer si Deno est bien détecté
+    # pytubefix utilise automatiquement Deno (qui est installé) pour générer un PO-Token et esquiver le blocage !
+    try:
+        yt = YouTube(url, client='WEB')
+        video_id = yt.video_id
         
-        # Utilisation du fichier cookies exporté manuellement (chemin absolu)
-        'cookiefile': cookie_path
-    }
-    
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info_dict = ydl.extract_info(url, download=True)
-        video_id = info_dict.get('id', 'video')
-        ext = info_dict.get('ext', 'mp4')
-        return os.path.join(output_dir, f"{video_id}.{ext}")
+        # Récupère le meilleur flux qui a l'image ET le son (parfait pour TikTok)
+        stream = yt.streams.get_highest_resolution()
+        
+        # Télécharge la vidéo
+        out_path = stream.download(output_path=output_dir, filename=f"{video_id}.mp4")
+        return out_path
+        
+    except Exception as e:
+        print(f"Erreur pytubefix sur {url} : {e}")
+        return ""
 
 def process_video(input_path: str, output_path: str) -> bool:
     """
