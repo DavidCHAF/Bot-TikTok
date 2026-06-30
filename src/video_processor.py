@@ -1,31 +1,67 @@
 import os
 import random
-import yt_dlp
 import ffmpeg
+import requests
 
 def download_video(url: str, output_dir: str) -> str:
-    """Télécharge une vidéo via yt-dlp en utilisant l'authentification OAuth2 (Contournement Ultime Datacenter)."""
+    """Télécharge une vidéo via l'API publique Cobalt (contournement ULTIME des blocages Cloud)."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
-        'quiet': False,
-        'verbose': True,
-        
-        # Le Graal absolu pour les serveurs Cloud : On s'authentifie comme une Smart TV
-        'username': 'oauth2',
-    }
-    
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=True)
-            video_id = info_dict.get('id', 'video')
-            ext = info_dict.get('ext', 'mp4')
-            return os.path.join(output_dir, f"{video_id}.{ext}")
+        video_id = url.split('/')[-1].split('?')[0]
+        out_path = os.path.join(output_dir, f"{video_id}.mp4")
+        
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "url": url,
+            "vCodec": "h264" # Format idéal pour TikTok/FFmpeg
+        }
+        
+        # Liste d'instances publiques Cobalt 100% fiables (sans wuk.sh qui a crashé)
+        instances = [
+            "https://cobalt.q-n-d.de/api/json",
+            "https://cobalt.api.zmatey.ru/api/json",
+            "https://api.cobalt.tools/api/json"
+        ]
+        
+        res = None
+        for api_url in instances:
+            try:
+                # 1. Demande à l'API de récupérer la vidéo
+                r = requests.post(api_url, headers=headers, json=data, timeout=15)
+                if r.status_code == 200:
+                    res = r.json()
+                    break # Succès, on sort de la boucle
+            except Exception as e:
+                print(f"Échec sur {api_url}: {e}")
+                continue # On tente l'instance suivante
+                
+        if not res:
+            print("Erreur : Toutes les instances Cobalt sont inaccessibles.")
+            return ""
+            
+        # 2. Cobalt nous renvoie le lien direct MP4
+        download_url = res.get("url")
+        if not download_url:
+            print("Erreur : Cobalt n'a pas renvoyé de lien.")
+            return ""
+            
+        # 3. On télécharge le fichier
+        r_vid = requests.get(download_url, stream=True, timeout=30)
+        r_vid.raise_for_status()
+        
+        with open(out_path, 'wb') as f:
+            for chunk in r_vid.iter_content(chunk_size=8192):
+                f.write(chunk)
+                
+        return out_path
+        
     except Exception as e:
-        print(f"Erreur yt-dlp OAuth2 sur {url} : {e}")
+        print(f"Erreur globale sur le téléchargement Cobalt : {e}")
         return ""
 
 def process_video(input_path: str, output_path: str) -> bool:
