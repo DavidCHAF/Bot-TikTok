@@ -11,7 +11,8 @@ def download_video(url: str, output_dir: str) -> str:
     ydl_opts = {
         'format': 'best',
         'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
-        'quiet': True
+        'quiet': True,
+        'extractor_args': {'youtube': ['player_client=android,web']}
     }
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
