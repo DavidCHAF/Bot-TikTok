@@ -2,9 +2,31 @@ import os
 import random
 import ffmpeg
 import requests
+import socket
+
+# --- HACK ANTI-CENSURE ORACLE DNS ---
+# Oracle Cloud bloque la résolution DNS des domaines .de, .ru, .sh, .rocks
+# On force Python à utiliser le DNS de Google (DoH) pour trouver l'adresse IP de nos serveurs.
+old_getaddrinfo = socket.getaddrinfo
+
+def custom_dns_resolver(*args, **kwargs):
+    host = args[0]
+    if host in ['cobalt.q-n-d.de', 'co.wuk.sh', 'cobalt.api.zmatey.ru']:
+        try:
+            # On demande l'IP directement à Google
+            r = requests.get(f"https://dns.google/resolve?name={host}&type=A", timeout=5)
+            ip = r.json()['Answer'][0]['data']
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ip, args[1] if len(args)>1 else 443))]
+        except Exception as e:
+            pass
+    return old_getaddrinfo(*args, **kwargs)
+
+# On applique le patch réseau
+socket.getaddrinfo = custom_dns_resolver
+# ------------------------------------
 
 def download_video(url: str, output_dir: str) -> str:
-    """Télécharge une vidéo via le proxy d'Invidious (Masque l'IP Oracle complètement)."""
+    """Télécharge une vidéo via l'API publique Cobalt (avec DNS anti-censure)."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
@@ -12,41 +34,54 @@ def download_video(url: str, output_dir: str) -> str:
         video_id = url.split('/')[-1].split('?')[0]
         out_path = os.path.join(output_dir, f"{video_id}.mp4")
         
-        # Liste de serveurs Invidious ultra-stables
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "url": url,
+            "vCodec": "h264"
+        }
+        
+        # Nos instances de secours fiables
         instances = [
-            "https://vid.puffyan.us",
-            "https://invidious.jing.rocks",
-            "https://inv.tux.pizza"
+            "https://co.wuk.sh/api/json",
+            "https://cobalt.q-n-d.de/api/json"
         ]
         
-        success = False
-        for instance in instances:
-            # On tente la qualité 720p (itag=22), si elle n'existe pas, on passe en 360p (itag=18)
-            for itag in [22, 18]:
-                # Le paramètre local=true force le serveur Invidious à télécharger la vidéo à notre place
-                download_url = f"{instance}/latest_version?id={video_id}&itag={itag}&local=true"
-                try:
-                    r_vid = requests.get(download_url, stream=True, timeout=20)
-                    if r_vid.status_code == 200 and 'video' in r_vid.headers.get('Content-Type', ''):
-                        with open(out_path, 'wb') as f:
-                            for chunk in r_vid.iter_content(chunk_size=8192):
-                                f.write(chunk)
-                        success = True
-                        break # On a trouvé une vidéo valide, on arrête de chercher des itags
-                except Exception as e:
-                    print(f"Échec {instance} (itag {itag}) : {e}")
-                    continue
-            if success:
-                break # On arrête de chercher d'autres serveurs
+        res = None
+        for api_url in instances:
+            try:
+                # 1. Requête API (le DNS passera par Google automatiquement grâce au patch)
+                r = requests.post(api_url, headers=headers, json=data, timeout=15)
+                if r.status_code == 200:
+                    res = r.json()
+                    break
+            except Exception as e:
+                print(f"Échec {api_url} : {e}")
+                continue
                 
-        if not success:
-            print("Erreur : Tous les serveurs Invidious ont échoué ou bloqué l'accès.")
+        if not res:
+            print("Erreur : Impossible de joindre les serveurs Cobalt malgré le patch DNS.")
             return ""
             
+        # 2. Téléchargement du MP4
+        download_url = res.get("url")
+        if not download_url:
+            print("Erreur : Cobalt n'a pas renvoyé de lien MP4.")
+            return ""
+            
+        r_vid = requests.get(download_url, stream=True, timeout=30)
+        r_vid.raise_for_status()
+        
+        with open(out_path, 'wb') as f:
+            for chunk in r_vid.iter_content(chunk_size=8192):
+                f.write(chunk)
+                
         return out_path
         
     except Exception as e:
-        print(f"Erreur globale Invidious : {e}")
+        print(f"Erreur globale Cobalt : {e}")
         return ""
 
 def process_video(input_path: str, output_path: str) -> bool:
