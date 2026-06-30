@@ -1,60 +1,42 @@
 import os
 import random
 import ffmpeg
-import requests
+from pytubefix import YouTube
+from pytubefix.cli import on_progress
 
 def download_video(url: str, output_dir: str) -> str:
-    """Télécharge une vidéo via l'API publique Cobalt (contournement ULTIME des blocages Cloud)."""
+    """Télécharge une vidéo via pytubefix (Clients TV/IOS pour esquiver les blocages)."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
     try:
-        video_id = url.split('/')[-1].split('?')[0]
-        out_path = os.path.join(output_dir, f"{video_id}.mp4")
+        # Essai 1 : Client TV (Esquive souvent la détection bot sans aucun token)
+        yt = YouTube(url, client='TV')
+        video_id = yt.video_id
+        stream = yt.streams.get_highest_resolution()
         
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Origin": "https://cobalt.tools",
-            "Referer": "https://cobalt.tools/"
-        }
-        data = {
-            "url": url,
-            "vCodec": "h264" # Format idéal pour TikTok/FFmpeg
-        }
-        
-        # On utilise UNIQUEMENT l'instance officielle (Cloudflare) car Oracle bloque les DNS exotiques
-        api_url = "https://api.cobalt.tools/"
-        
-        try:
-            # 1. Demande à l'API de récupérer la vidéo
-            r = requests.post(api_url, headers=headers, json=data, timeout=15)
-            r.raise_for_status()
-            res = r.json()
-        except Exception as e:
-            print(f"Échec critique sur {api_url}: {e} | Réponse: {r.text if 'r' in locals() else 'Aucune'}")
-            return ""
+        if not stream:
+            raise Exception("Aucun flux trouvé avec le client TV")
             
-        # 2. Cobalt nous renvoie le lien direct MP4
-        download_url = res.get("url")
-        if not download_url:
-            print("Erreur : Cobalt n'a pas renvoyé de lien.")
-            return ""
-            
-        # 3. On télécharge le fichier
-        r_vid = requests.get(download_url, stream=True, timeout=30)
-        r_vid.raise_for_status()
-        
-        with open(out_path, 'wb') as f:
-            for chunk in r_vid.iter_content(chunk_size=8192):
-                f.write(chunk)
-                
+        out_path = stream.download(output_path=output_dir, filename=f"{video_id}.mp4")
         return out_path
         
-    except Exception as e:
-        print(f"Erreur globale sur le téléchargement Cobalt : {e}")
-        return ""
+    except Exception as e1:
+        print(f"Échec Pytubefix (TV) : {e1}")
+        try:
+            # Essai 2 : Client IOS en secours
+            yt = YouTube(url, client='IOS')
+            video_id = yt.video_id
+            stream = yt.streams.get_highest_resolution()
+            
+            if not stream:
+                raise Exception("Aucun flux trouvé avec le client IOS")
+                
+            out_path = stream.download(output_path=output_dir, filename=f"{video_id}.mp4")
+            return out_path
+        except Exception as e2:
+            print(f"Échec Pytubefix (IOS) : {e2}")
+            return ""
 
 def process_video(input_path: str, output_path: str) -> bool:
     """
