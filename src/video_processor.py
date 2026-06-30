@@ -18,8 +18,6 @@ def download_video(url: str, output_dir: str) -> str:
         # ACTIVER NODE.JS : Requis pour résoudre l'énigme "n challenge" sur YouTube
         'js_runtimes': {'node': {}},
         
-        # L'API iOS de YouTube ne demande généralement pas le fameux "n challenge" Javascript
-        'extractor_args': {'youtube': ['player_client=ios']},
         # Utilisation du fichier cookies exporté manuellement
         'cookiefile': 'cookies.txt'
     }
