@@ -2,6 +2,29 @@ import os
 import re
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from langdetect import detect
+from langdetect.lang_detect_exception import LangDetectException
+
+def is_correct_language(text: str, target_lang: str) -> bool:
+    """
+    Vérifie si le texte correspond à la langue cible.
+    Utilise langdetect pour filtrer strictement l'Espagnol, le Turc, l'Allemand, etc.
+    """
+    if not text or len(text) < 10:
+        return True
+        
+    try:
+        detected = detect(text)
+        # Si on veut de l'anglais, on bloque les langues parasites courantes
+        if target_lang == 'en' and detected in ['es', 'tr', 'de', 'fr', 'pt', 'it', 'nl', 'pl', 'ro']:
+            return False
+        # Si on veut du français, on bloque l'anglais, espagnol, etc.
+        if target_lang == 'fr' and detected in ['en', 'es', 'tr', 'de', 'pt', 'it', 'nl']:
+            return False
+    except LangDetectException:
+        pass
+        
+    return True
 
 def is_western_content(text: str) -> bool:
     """
@@ -128,6 +151,13 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                 # Filtrage : On exclut les vidéos dont le titre ou la description contient des scripts asiatiques/indiens/arabes/russes
                 if not is_western_content(title) or not is_western_content(description):
                     continue
+                    
+                # Filtrage de langue strict (langdetect) si une langue est demandée
+                if lang:
+                    target_lang = lang.split("-")[0] if "-" in lang else lang
+                    full_text = f"{title}. {description}"
+                    if not is_correct_language(full_text, target_lang):
+                        continue
                 
                 videos.append({
                     "id": stat["id"],
