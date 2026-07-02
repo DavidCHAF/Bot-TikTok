@@ -7,6 +7,7 @@ def is_western_content(text: str) -> bool:
     """
     Vérifie si le texte contient des caractères d'alphabets non-occidentaux.
     Retourne False si on détecte du Cyrillique, Arabe, Hindi, Thaï, Chinois, etc.
+    Ou s'il contient des mots-clés typiques de fermes de contenu asiatiques/indiennes.
     """
     if not text:
         return True
@@ -15,7 +16,21 @@ def is_western_content(text: str) -> bool:
     forbidden_pattern = re.compile(
         r'[\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0980-\u09FF\u0E00-\u0E7F\u4E00-\u9FFF\u3040-\u30FF\u3130-\u318F\uAC00-\uD7AF]'
     )
-    return not bool(forbidden_pattern.search(text))
+    if forbidden_pattern.search(text):
+        return False
+        
+    # Mots-clés typiques des fermes de clic indiennes/russes/asiatiques
+    blacklist_keywords = [
+        "wait for end", "wait for it", "respect", "sigma rule", 
+        "boys attitude", "girls attitude", "komedi", "mr indian",
+        "crazy xyz", "pubg", "bgmi", "free fire", "whatsapp status"
+    ]
+    text_lower = text.lower()
+    for kw in blacklist_keywords:
+        if kw in text_lower:
+            return False
+            
+    return True
 
 def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -> list:
     """
@@ -78,11 +93,37 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
             
             stats_items = stats_response.get("items", [])
             
+            # 3. Étape Pays de la Chaîne (Channels)
+            # On récupère le pays d'origine de toutes les chaînes de ces 50 vidéos
+            channel_ids = list(set([stat["snippet"]["channelId"] for stat in stats_items if "channelId" in stat["snippet"]]))
+            channel_countries = {}
+            if channel_ids:
+                try:
+                    channels_response = youtube.channels().list(
+                        part="snippet",
+                        id=",".join(channel_ids)
+                    ).execute()
+                    for ch in channels_response.get("items", []):
+                        country = ch.get("snippet", {}).get("country")
+                        if country:
+                            channel_countries[ch["id"]] = country.upper()
+                except Exception as e:
+                    print(f"⚠️ Erreur récupération pays channels: {e}")
+            
+            # Pays à bannir (fermes de contenu majeures)
+            banned_countries = ['IN', 'ID', 'PK', 'BD', 'RU', 'VN', 'TH', 'PH', 'MY', 'BR']
+            
             for stat in stats_items:
                 stats = stat.get("statistics", {})
                 snippet = stat.get("snippet", {})
                 title = snippet.get("title", "")
                 description = snippet.get("description", "")
+                channel_id = snippet.get("channelId", "")
+                country = channel_countries.get(channel_id)
+                
+                # Filtrage strict du pays de la chaîne YouTube
+                if country in banned_countries:
+                    continue
                 
                 # Filtrage : On exclut les vidéos dont le titre ou la description contient des scripts asiatiques/indiens/arabes/russes
                 if not is_western_content(title) or not is_western_content(description):
