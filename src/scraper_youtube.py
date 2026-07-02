@@ -46,7 +46,8 @@ def is_western_content(text: str) -> bool:
     blacklist_keywords = [
         "wait for end", "wait for it", "respect", "sigma rule", 
         "boys attitude", "girls attitude", "komedi", "mr indian",
-        "crazy xyz", "pubg", "bgmi", "free fire", "whatsapp status"
+        "crazy xyz", "pubg", "bgmi", "free fire", "whatsapp status",
+        "fact", "facts", "knowledge", "story", "kahani", "hindi", "india", "bhai"
     ]
     text_lower = text.lower()
     for kw in blacklist_keywords:
@@ -68,6 +69,7 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
     
     videos = []
     next_page_token = None
+    published_before = None
     
     # On ajoute #shorts à la requête pour cibler au maximum ce format
     query = f"{niche} #shorts"
@@ -86,6 +88,9 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                 "pageToken": next_page_token
             }
             
+            if published_before:
+                search_params["publishedBefore"] = published_before
+                
             # Injection de la langue si spécifiée
             if lang:
                 if "-" in lang:
@@ -133,23 +138,36 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                 except Exception as e:
                     print(f"⚠️ Erreur récupération pays channels: {e}")
             
-            # Pays à bannir (fermes de contenu majeures)
-            banned_countries = ['IN', 'ID', 'PK', 'BD', 'RU', 'VN', 'TH', 'PH', 'MY', 'BR']
+            # Configuration de la Whitelist (Liste Blanche)
+            allowed_countries = None
+            if lang:
+                target_lang = lang.split("-")[0] if "-" in lang else lang
+                if target_lang == 'en':
+                    allowed_countries = ['US', 'CA', 'GB', 'AU', 'NZ', None]
+                elif target_lang == 'fr':
+                    allowed_countries = ['FR', 'CA', 'BE', 'CH', None]
             
             for stat in stats_items:
                 stats = stat.get("statistics", {})
                 snippet = stat.get("snippet", {})
                 title = snippet.get("title", "")
                 description = snippet.get("description", "")
+                channel_title = snippet.get("channelTitle", "")
                 channel_id = snippet.get("channelId", "")
                 country = channel_countries.get(channel_id)
                 
-                # Filtrage strict du pays de la chaîne YouTube
-                if country in banned_countries:
-                    continue
+                # Filtrage strict par Liste Blanche de pays
+                if allowed_countries is not None:
+                    if country not in allowed_countries:
+                        continue
+                else:
+                    # Fallback sur l'ancienne blacklist si aucune langue précise n'est demandée
+                    banned_countries = ['IN', 'ID', 'PK', 'BD', 'RU', 'VN', 'TH', 'PH', 'MY', 'BR']
+                    if country in banned_countries:
+                        continue
                 
-                # Filtrage : On exclut les vidéos dont le titre ou la description contient des scripts asiatiques/indiens/arabes/russes
-                if not is_western_content(title) or not is_western_content(description):
+                # Filtrage : On exclut les vidéos dont le titre, description, OU NOM DE CHAÎNE contient des scripts asiatiques/indiens/arabes/russes
+                if not is_western_content(title) or not is_western_content(description) or not is_western_content(channel_title):
                     continue
                     
                 # Filtrage de langue strict (langdetect) si une langue est demandée
@@ -176,8 +194,20 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
             print(f"✅ Scraping: {len(videos)} Shorts récupérés...")
             
             next_page_token = search_response.get("nextPageToken")
-            if not next_page_token:
-                break
+            
+            # Si l'API YouTube bloque (plus de pageToken) mais qu'on n'a pas fini : 
+            # on remonte le temps à partir de la dernière vidéo !
+            if not next_page_token and len(videos) < max_videos:
+                last_published = None
+                if search_items:
+                    last_published = search_items[-1]["snippet"]["publishedAt"]
+                
+                if last_published:
+                    published_before = last_published
+                    next_page_token = None
+                    print(f"🔄 Limite API atteinte. Reprise de la recherche dans le passé depuis : {published_before}")
+                else:
+                    break
                 
     except HttpError as e:
         print(f"❌ Erreur API YouTube: {e}")
