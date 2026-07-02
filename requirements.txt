@@ -4,3 +4,4 @@ ffmpeg-python==0.2.0
 pytest==8.2.2
 requests==2.32.3
 google-api-python-client==2.133.0
+langdetect==1.0.9
