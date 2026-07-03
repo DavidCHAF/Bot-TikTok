@@ -107,16 +107,17 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
             published_before = None
             
             while len(videos) < max_videos:
-                # 1. Étape Recherche (Search)
-                search_params = {
-                    "q": query,
-                    "part": "id,snippet",
-                    "type": "video",
-                    "videoDuration": "short", # Filtre officiel pour les vidéos < 4 min
-                    "order": "date",          # Tri strict par date d'ajout
-                    "maxResults": 50,
-                    "pageToken": next_page_token
-                }
+                try:
+                    # 1. Étape Recherche (Search)
+                    search_params = {
+                        "q": query,
+                        "part": "id,snippet",
+                        "type": "video",
+                        "videoDuration": "short", # Filtre officiel pour les vidéos < 4 min
+                        "order": "date",          # Tri strict par date d'ajout
+                        "maxResults": 50,
+                        "pageToken": next_page_token
+                    }
                 
                 if published_before:
                     search_params["publishedBefore"] = published_before
@@ -240,22 +241,22 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                         print(f"⚠️ Mur de l'API atteint pour '{query}'. Passage au mot-clé suivant...")
                         break
                         
-            except HttpError as e:
-                # Gestion de l'erreur de Quota (403 ou 429)
-                if e.resp.status in [403, 429]:
-                    print(f"⚠️ Quota épuisé pour la clé API n°{current_key_idx + 1}.")
-                    current_key_idx += 1
-                    if current_key_idx < len(api_keys):
-                        print(f"🔄 Passage à la clé API n°{current_key_idx + 1}...")
-                        youtube = build("youtube", "v3", developerKey=api_keys[current_key_idx])
-                        continue # On relance la boucle while sans changer de mot-clé
+                except HttpError as e:
+                    # Gestion de l'erreur de Quota (403 ou 429)
+                    if e.resp.status in [403, 429]:
+                        print(f"⚠️ Quota épuisé pour la clé API n°{current_key_idx + 1}.")
+                        current_key_idx += 1
+                        if current_key_idx < len(api_keys):
+                            print(f"🔄 Passage à la clé API n°{current_key_idx + 1}...")
+                            youtube = build("youtube", "v3", developerKey=api_keys[current_key_idx])
+                            continue # On relance la boucle while sans changer de mot-clé
+                        else:
+                            print("❌ Toutes les clés API sont épuisées pour aujourd'hui !")
+                            return videos[:max_videos] # On quitte tout et on renvoie ce qu'on a
                     else:
-                        print("❌ Toutes les clés API sont épuisées pour aujourd'hui !")
-                        return videos[:max_videos] # On quitte tout et on renvoie ce qu'on a
-                else:
-                    print(f"❌ Erreur API YouTube non liée au quota: {e}")
-                    break
-                    
+                        print(f"❌ Erreur API YouTube non liée au quota: {e}")
+                        break
+                        
         except Exception as e:
             print(f"❌ Erreur inattendue dans la boucle query: {e}")
             break
