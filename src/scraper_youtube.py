@@ -79,11 +79,12 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
     Fonction pour scraper YouTube Shorts via l'API Officielle Google (YouTube Data API v3).
     Récupère jusqu'à max_videos vidéos récentes pour un hashtag donné (avec filtre de langue optionnel).
     """
-    api_key = os.getenv("YOUTUBE_API_KEY")
-    if not api_key:
+    api_keys = get_api_keys()
+    if not api_keys:
         raise Exception("Clé YOUTUBE_API_KEY manquante. Veuillez la configurer dans l'environnement.")
 
-    youtube = build("youtube", "v3", developerKey=api_key)
+    current_key_idx = 0
+    youtube = build("youtube", "v3", developerKey=api_keys[current_key_idx])
     
     videos = []
     
