@@ -119,127 +119,127 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                         "pageToken": next_page_token
                     }
                 
-                if published_before:
-                    search_params["publishedBefore"] = published_before
+                    if published_before:
+                        search_params["publishedBefore"] = published_before
                     
-                # Injection de la langue si spécifiée
-                if lang:
-                    if "-" in lang:
-                        language, region = lang.split("-", 1)
-                        search_params["relevanceLanguage"] = language
-                        search_params["regionCode"] = region.upper()
-                    else:
-                        search_params["relevanceLanguage"] = lang
-                        # Si l'utilisateur demande juste de l'anglais, on force la région US par défaut
-                        if lang.lower() == 'en':
-                            search_params["regionCode"] = "US"
+                    # Injection de la langue si spécifiée
+                    if lang:
+                        if "-" in lang:
+                            language, region = lang.split("-", 1)
+                            search_params["relevanceLanguage"] = language
+                            search_params["regionCode"] = region.upper()
+                        else:
+                            search_params["relevanceLanguage"] = lang
+                            # Si l'utilisateur demande juste de l'anglais, on force la région US par défaut
+                            if lang.lower() == 'en':
+                                search_params["regionCode"] = "US"
                     
-                search_response = youtube.search().list(**search_params).execute()
+                    search_response = youtube.search().list(**search_params).execute()
                 
-                search_items = search_response.get("items", [])
-                if not search_items:
-                    break
+                    search_items = search_response.get("items", [])
+                    if not search_items:
+                        break
                     
-                # Extraire les IDs pour récupérer les statistiques
-                video_ids = [item["id"]["videoId"] for item in search_items]
+                    # Extraire les IDs pour récupérer les statistiques
+                    video_ids = [item["id"]["videoId"] for item in search_items]
                 
-                # 2. Étape Statistiques (Videos)
-                # On fait une requête groupée (batch) pour avoir les vues/likes des 50 vidéos d'un coup
-                stats_response = youtube.videos().list(
-                    part="statistics,snippet",
-                    id=",".join(video_ids)
-                ).execute()
+                    # 2. Étape Statistiques (Videos)
+                    # On fait une requête groupée (batch) pour avoir les vues/likes des 50 vidéos d'un coup
+                    stats_response = youtube.videos().list(
+                        part="statistics,snippet",
+                        id=",".join(video_ids)
+                    ).execute()
                 
-                stats_items = stats_response.get("items", [])
+                    stats_items = stats_response.get("items", [])
                 
-                # 3. Étape Pays de la Chaîne (Channels)
-                # On récupère le pays d'origine de toutes les chaînes de ces 50 vidéos
-                channel_ids = list(set([stat["snippet"]["channelId"] for stat in stats_items if "channelId" in stat["snippet"]]))
-                channel_countries = {}
-                if channel_ids:
-                    try:
-                        channels_response = youtube.channels().list(
-                            part="snippet",
-                            id=",".join(channel_ids)
-                        ).execute()
-                        for ch in channels_response.get("items", []):
-                            country = ch.get("snippet", {}).get("country")
-                            if country:
-                                channel_countries[ch["id"]] = country.upper()
-                    except Exception as e:
-                        print(f"⚠️ Erreur récupération pays channels: {e}")
+                    # 3. Étape Pays de la Chaîne (Channels)
+                    # On récupère le pays d'origine de toutes les chaînes de ces 50 vidéos
+                    channel_ids = list(set([stat["snippet"]["channelId"] for stat in stats_items if "channelId" in stat["snippet"]]))
+                    channel_countries = {}
+                    if channel_ids:
+                        try:
+                            channels_response = youtube.channels().list(
+                                part="snippet",
+                                id=",".join(channel_ids)
+                            ).execute()
+                            for ch in channels_response.get("items", []):
+                                country = ch.get("snippet", {}).get("country")
+                                if country:
+                                    channel_countries[ch["id"]] = country.upper()
+                        except Exception as e:
+                            print(f"⚠️ Erreur récupération pays channels: {e}")
                 
-                # Configuration de la Whitelist (Liste Blanche)
-                allowed_countries = None
-                if lang:
-                    target_lang = lang.split("-")[0] if "-" in lang else lang
-                    if target_lang == 'en':
-                        allowed_countries = ['US', 'CA', 'GB', 'AU', 'NZ', None]
-                    elif target_lang == 'fr':
-                        allowed_countries = ['FR', 'CA', 'BE', 'CH', None]
-                
-                for stat in stats_items:
-                    stats = stat.get("statistics", {})
-                    snippet = stat.get("snippet", {})
-                    title = snippet.get("title", "")
-                    description = snippet.get("description", "")
-                    channel_title = snippet.get("channelTitle", "")
-                    channel_id = snippet.get("channelId", "")
-                    country = channel_countries.get(channel_id)
-                    
-                    # Filtrage strict par Liste Blanche de pays
-                    if allowed_countries is not None:
-                        if country not in allowed_countries:
-                            continue
-                    else:
-                        # Fallback sur l'ancienne blacklist si aucune langue précise n'est demandée
-                        banned_countries = ['IN', 'ID', 'PK', 'BD', 'RU', 'VN', 'TH', 'PH', 'MY', 'BR']
-                        if country in banned_countries:
-                            continue
-                    
-                    # Filtrage : On exclut les vidéos dont le titre, description, OU NOM DE CHAÎNE contient des scripts asiatiques/indiens/arabes/russes
-                    if not is_western_content(title) or not is_western_content(description) or not is_western_content(channel_title):
-                        continue
-                        
-                    # Filtrage de langue strict (langdetect) si une langue est demandée
+                    # Configuration de la Whitelist (Liste Blanche)
+                    allowed_countries = None
                     if lang:
                         target_lang = lang.split("-")[0] if "-" in lang else lang
-                        full_text = f"{title}. {description}"
-                        if not is_correct_language(full_text, target_lang):
+                        if target_lang == 'en':
+                            allowed_countries = ['US', 'CA', 'GB', 'AU', 'NZ', None]
+                        elif target_lang == 'fr':
+                            allowed_countries = ['FR', 'CA', 'BE', 'CH', None]
+                
+                    for stat in stats_items:
+                        stats = stat.get("statistics", {})
+                        snippet = stat.get("snippet", {})
+                        title = snippet.get("title", "")
+                        description = snippet.get("description", "")
+                        channel_title = snippet.get("channelTitle", "")
+                        channel_id = snippet.get("channelId", "")
+                        country = channel_countries.get(channel_id)
+                    
+                        # Filtrage strict par Liste Blanche de pays
+                        if allowed_countries is not None:
+                            if country not in allowed_countries:
+                                continue
+                        else:
+                            # Fallback sur l'ancienne blacklist si aucune langue précise n'est demandée
+                            banned_countries = ['IN', 'ID', 'PK', 'BD', 'RU', 'VN', 'TH', 'PH', 'MY', 'BR']
+                            if country in banned_countries:
+                                continue
+                    
+                        # Filtrage : On exclut les vidéos dont le titre, description, OU NOM DE CHAÎNE contient des scripts asiatiques/indiens/arabes/russes
+                        if not is_western_content(title) or not is_western_content(description) or not is_western_content(channel_title):
                             continue
+                        
+                        # Filtrage de langue strict (langdetect) si une langue est demandée
+                        if lang:
+                            target_lang = lang.split("-")[0] if "-" in lang else lang
+                            full_text = f"{title}. {description}"
+                            if not is_correct_language(full_text, target_lang):
+                                continue
                     
-                    videos.append({
-                        "id": stat["id"],
-                        "url": f"https://www.youtube.com/shorts/{stat['id']}",
-                        "title": title,
-                        "views": int(stats.get("viewCount", 0)),
-                        "likes": int(stats.get("likeCount", 0)),
-                        "comments": int(stats.get("commentCount", 0)),
-                        "shares": 0, # YouTube API ne donne pas les partages
-                        "create_time": snippet.get("publishedAt", "") # Format ISO 8601
-                    })
+                        videos.append({
+                            "id": stat["id"],
+                            "url": f"https://www.youtube.com/shorts/{stat['id']}",
+                            "title": title,
+                            "views": int(stats.get("viewCount", 0)),
+                            "likes": int(stats.get("likeCount", 0)),
+                            "comments": int(stats.get("commentCount", 0)),
+                            "shares": 0, # YouTube API ne donne pas les partages
+                            "create_time": snippet.get("publishedAt", "") # Format ISO 8601
+                        })
                     
-                    if len(videos) >= max_videos:
-                        break
+                        if len(videos) >= max_videos:
+                            break
                 
-                print(f"✅ Scraping: {len(videos)} Shorts récupérés...")
+                    print(f"✅ Scraping: {len(videos)} Shorts récupérés...")
                 
-                next_page_token = search_response.get("nextPageToken")
+                    next_page_token = search_response.get("nextPageToken")
                 
-                # Si l'API YouTube bloque (plus de pageToken) mais qu'on n'a pas fini : 
-                # on remonte le temps à partir de la dernière vidéo !
-                if not next_page_token and len(videos) < max_videos:
-                    last_published = None
-                    if search_items:
-                        last_published = search_items[-1]["snippet"]["publishedAt"]
+                    # Si l'API YouTube bloque (plus de pageToken) mais qu'on n'a pas fini : 
+                    # on remonte le temps à partir de la dernière vidéo !
+                    if not next_page_token and len(videos) < max_videos:
+                        last_published = None
+                        if search_items:
+                            last_published = search_items[-1]["snippet"]["publishedAt"]
                     
-                    if last_published:
-                        published_before = last_published
-                        next_page_token = None
-                        print(f"🔄 Limite atteinte pour '{query}'. Reprise dans le passé depuis : {published_before}")
-                    else:
-                        print(f"⚠️ Mur de l'API atteint pour '{query}'. Passage au mot-clé suivant...")
-                        break
+                        if last_published:
+                            published_before = last_published
+                            next_page_token = None
+                            print(f"🔄 Limite atteinte pour '{query}'. Reprise dans le passé depuis : {published_before}")
+                        else:
+                            print(f"⚠️ Mur de l'API atteint pour '{query}'. Passage au mot-clé suivant...")
+                            break
                         
                 except HttpError as e:
                     # Gestion de l'erreur de Quota (403 ou 429)
@@ -257,9 +257,9 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                         print(f"❌ Erreur API YouTube non liée au quota: {e}")
                         break
                         
-        except Exception as e:
-            print(f"❌ Erreur inattendue dans la boucle query: {e}")
-            break
+    except Exception as e:
+        print(f"❌ Erreur inattendue dans la boucle query: {e}")
+        return videos[:max_videos]
             
     return videos[:max_videos]
 
