@@ -69,8 +69,9 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
     youtube = build("youtube", "v3", developerKey=api_key)
     videos = []
     
+    # Suppression du symbole # pour éviter la page "Hashtag" spéciale de YouTube qui bloque le scraper
     queries = [
-        f"{niche} #shorts",
+        f"{niche} shorts",
         f"{niche} tiktok",
         f"{niche} viral",
         f"{niche} trend",
@@ -166,12 +167,13 @@ def process_video_batch(video_ids: list, youtube, needed: int, lang: str) -> lis
             channel_id = snippet.get("channelId", "")
             country = channel_countries.get(channel_id)
             
-            # Vérification de la durée (Shorts = < 4 minutes max)
+            # GOULET D'ÉTRANGLEMENT ANTI-LONGUES VIDÉOS (C'est ça qui te protège)
+            # Vérification de la durée de la vidéo via l'API Officielle
             duration = stat.get("contentDetails", {}).get("duration", "")
-            if "H" in duration:
+            if "H" in duration: # Si ça dure des heures, on jette
                 continue
             match = re.search(r'PT(\d+)M', duration)
-            if match and int(match.group(1)) >= 4:
+            if match and int(match.group(1)) >= 4: # Si c'est >= 4 minutes, on jette
                 continue
             
             # Filtrage Pays
