@@ -203,8 +203,19 @@ async def execute_t2_logic(context: ContextTypes.DEFAULT_TYPE, chat_id: int, nic
                     continue
                 
                 output_video = os.path.join(output_dir, f"processed_top{i+1}_{trend['id']}.mp4")
-                await context.bot.send_message(chat_id=chat_id, text=f"🎨 Traitement FFmpeg du Top {i+1}...")
-                success = await asyncio.to_thread(process_video, input_video, output_video)
+                
+                progress_msg = await context.bot.send_message(chat_id=chat_id, text=f"🎨 Traitement FFmpeg du Top {i+1}... [░░░░░░░░░░] 0%")
+                
+                async def update_progress(percent: int):
+                    bar_length = 10
+                    filled = int(percent / 10)
+                    bar = '█' * filled + '░' * (bar_length - filled)
+                    text = f"🎨 Traitement FFmpeg du Top {i+1}... [{bar}] {percent}%"
+                    # Edit only if it's not the exact same text to avoid Telegram errors
+                    if progress_msg.text != text:
+                        await progress_msg.edit_text(text)
+                
+                success = await process_video(input_video, output_video, update_progress)
                 
                 if success and os.path.exists(output_video):
                     print(f"🔧 [DEBUG] Envoi de la vidéo traitée vers Telegram...")

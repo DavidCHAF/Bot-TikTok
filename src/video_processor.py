@@ -1,5 +1,8 @@
 import os
 import random
+import asyncio
+import re
+import time
 import yt_dlp
 import ffmpeg
 
@@ -36,12 +39,21 @@ def download_video(url: str, output_dir: str) -> str:
         print(f"Erreur yt-dlp avec cookies sur {url} : {e}")
         return ""
 
-def process_video(input_path: str, output_path: str) -> bool:
+async def get_video_duration(input_path: str) -> float:
+    try:
+        probe = await asyncio.to_thread(ffmpeg.probe, input_path)
+        return float(probe['format']['duration'])
+    except Exception:
+        return 0.0
+
+async def process_video(input_path: str, output_path: str, progress_callback=None) -> bool:
     """
     Applique des filtres discrets via FFmpeg pour contourner la détection.
     """
     try:
         print(f"🔧 [DEBUG] Démarrage FFmpeg : {input_path} -> {output_path}")
+        duration = await get_video_duration(input_path)
+        
         # Rotation aléatoire entre -1.5 et 1.5 degrés
         rotation_deg = random.uniform(-1.5, 1.5)
         angle_rad = rotation_deg * (3.14159 / 180.0)
@@ -54,13 +66,12 @@ def process_video(input_path: str, output_path: str) -> bool:
         video = ffmpeg.filter(video, 'rotate', a=angle_rad)
         
         # 2. Crop pour enlever les filigranes (souvent sur les bords) et les bords noirs de la rotation
-        # On coupe 8% de chaque côté. On force les dimensions paires avec floor(X/2)*2 pour libx264
         video = ffmpeg.filter(video, 'crop', w='floor(iw*0.84/2)*2', h='floor(ih*0.84/2)*2', x='floor(iw*0.08/2)*2', y='floor(ih*0.08/2)*2')
         
-        # 3. Bruit léger / variations luma (quasi-imperceptible)
-        video = ffmpeg.filter(video, 'noise', alls=1, allf='t+u')
+        # 3. Bruit léger (Optimisé pour petit CPU)
+        video = ffmpeg.filter(video, 'noise', c0s=1, c0f='t+u')
         
-        # Assemblage et encodage, -map_metadata -1 pour supprimer les métadonnées
+        # Assemblage et encodage
         out = ffmpeg.output(
             video, 
             audio, 
@@ -71,17 +82,56 @@ def process_video(input_path: str, output_path: str) -> bool:
             preset='ultrafast',
             threads=1,
             acodec='aac'
+        ).overwrite_output().global_args('-nostdin')
+        
+        args = out.compile()
+        
+        print(f"🔧 [DEBUG] Lancement async de FFmpeg. Durée totale: {duration}s")
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
         
-        print(f"🔧 [DEBUG] Lancement de la commande FFmpeg. Patientez...")
-        out.overwrite_output().global_args('-nostdin').run(capture_stdout=True, capture_stderr=True)
-        print(f"🔧 [DEBUG] FFmpeg a terminé avec succès.")
-        return True
-    except ffmpeg.Error as e:
-        print("Erreur FFmpeg :")
-        if e.stderr:
-            print(e.stderr.decode('utf-8', errors='ignore'))
-        return False
+        time_regex = re.compile(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})")
+        last_update_time = time.time()
+        
+        while True:
+            line = await process.stderr.readline()
+            if not line:
+                break
+                
+            line_str = line.decode('utf-8', errors='ignore')
+            
+            if duration > 0 and progress_callback:
+                match = time_regex.search(line_str)
+                if match:
+                    h, m, s = match.groups()
+                    current_time_sec = int(h) * 3600 + int(m) * 60 + float(s)
+                    percent = min(100, int((current_time_sec / duration) * 100))
+                    
+                    if time.time() - last_update_time >= 5.0:
+                        try:
+                            await progress_callback(percent)
+                        except Exception as e:
+                            pass # Ignorer les erreurs Telegram limit
+                        last_update_time = time.time()
+                        
+        await process.wait()
+        
+        if process.returncode == 0:
+            if progress_callback:
+                try:
+                    await progress_callback(100)
+                except:
+                    pass
+            print(f"🔧 [DEBUG] FFmpeg a terminé avec succès.")
+            return True
+        else:
+            stderr_out = await process.stderr.read()
+            print(f"Erreur FFmpeg: {stderr_out.decode('utf-8', errors='ignore')}")
+            return False
+            
     except Exception as e:
         print(f"🔧 [DEBUG] Exception inattendue dans process_video : {e}")
         return False
