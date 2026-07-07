@@ -395,7 +395,6 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             margin_r = pad_x
             
         # Sous-titres VTT
-        import os
         vtt_abs = os.path.abspath(tts_vtt)
         vtt_safe = vtt_abs.replace('\\', '/').replace(':', '\\:')
         
