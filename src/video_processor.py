@@ -368,40 +368,39 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         # Application des masques dynamiques
         if zones:
             print(f"[Remaster] {len(zones)} zones de texte detectees. Masquage...")
-            for z in zones:
-                # Ajout de marges de securite au rectangle noir pour etre sur qu'il couvre bien l'ancien texte
-                pad_x = max(0, z['x'] - 30)
-                pad_y = max(0, z['y'] - 20)
-                pad_w = min(video_width - pad_x, z['w'] + 60)
-                pad_h = z['h'] + 40
-                video = ffmpeg.filter(video, 'drawbox', x=pad_x, y=pad_y, width=pad_w, height=pad_h, color='black@1.0', t='fill')
-            
-            # Placer le sous-titre dans la zone la plus large
             main_z = max(zones, key=lambda z: z['w']*z['h'])
-            pad_x = max(0, main_z['x'] - 30)
-            pad_y = max(0, main_z['y'] - 20)
-            pad_w = min(video_width - pad_x, main_z['w'] + 60)
-            pad_h = main_z['h'] + 40
+            
+            # On force le rectangle noir a faire 80% de la largeur de l'ecran et a etre centre
+            # Cela garantit que le nouveau texte aura toujours la place de s'afficher
+            pad_x = int(video_width * 0.1)
+            pad_w = int(video_width * 0.8)
+            pad_y = max(0, main_z['y'] - 30)
+            pad_h = main_z['h'] + 60
+            
+            video = ffmpeg.filter(video, 'drawbox', x=pad_x, y=pad_y, width=pad_w, height=pad_h, color='black@1.0', t='fill')
             
             # Marge basse (MarginV)
-            margin_v = video_height - (pad_y + pad_h) + 10
+            margin_v = video_height - (pad_y + pad_h) + 15
             if margin_v < 10: margin_v = 10
-            # Marges pour bloquer le texte
-            margin_l = pad_x + 15
-            margin_r = video_width - (pad_x + pad_w) + 15
+            # Marges gauche et droite
+            margin_l = pad_x + 10
+            margin_r = pad_x + 10
         else:
             print("[Remaster] Aucun texte detecte. Utilisation de la zone de sous-titres par defaut.")
+            pad_x = int(video_width * 0.075) if video_width else 40
+            pad_w = int(video_width * 0.85) if video_width else 1000
             video = ffmpeg.filter(video, 'drawbox', x='(iw-w)/2', y='ih*0.75', width='iw*0.85', height='ih*0.15', color='black@1.0', t='fill')
             margin_v = int(video_height * 0.17) if video_height else 120
-            margin_l = int(video_width * 0.075) if video_width else 40
-            margin_r = margin_l
+            margin_l = pad_x
+            margin_r = pad_x
             
         # Sous-titres VTT
-        vtt_safe = tts_vtt.replace('\\', '/')
-        vtt_safe = vtt_safe.replace(':', '\\:')
-        # FontSize=45 pour que ce soit lisible sur mobile (14 etait microscopique sur du 1080p!)
-        # Outline=2 pour que le texte se detache bien
-        style = f'FontName=Arial,FontSize=45,PrimaryColour=&H00FFFFFF,Outline=2,MarginV={int(margin_v)},MarginL={int(margin_l)},MarginR={int(margin_r)},Alignment=2,WrapStyle=2'
+        import os
+        vtt_abs = os.path.abspath(tts_vtt)
+        vtt_safe = vtt_abs.replace('\\', '/').replace(':', '\\:')
+        
+        # WrapStyle=1 force le retour a la ligne intelligent
+        style = f'FontName=Arial,FontSize=45,PrimaryColour=&H00FFFFFF,Outline=2,MarginV={int(margin_v)},MarginL={int(margin_l)},MarginR={int(margin_r)},Alignment=2,WrapStyle=1'
         video = ffmpeg.filter(video, 'subtitles', filename=vtt_safe, force_style=style)
         
         # Mixage Audio
