@@ -357,7 +357,7 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             return False
             
         # Detection OCR dynamique
-        zones, video_height = await asyncio.to_thread(detect_text_zones, input_path)
+        zones, video_width, video_height = await asyncio.to_thread(detect_text_zones, input_path)
         
         # 5. Montage FFmpeg (Incrustation VTT, Mixage Audio, Bande Noire)
         if progress_callback: await progress_callback(85)
@@ -369,21 +369,30 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         if zones:
             print(f"[Remaster] {len(zones)} zones de texte detectees. Masquage...")
             for z in zones:
-                video = ffmpeg.filter(video, 'drawbox', x=z['x'], y=z['y'], width=z['w'], height=z['h'], color='black@0.95', t='fill')
+                # color='black@1.0' pour un rectangle 100% noir sans transparence
+                video = ffmpeg.filter(video, 'drawbox', x=z['x'], y=z['y'], width=z['w'], height=z['h'], color='black@1.0', t='fill')
             
+            # Placer le sous-titre dans la zone la plus large
             main_z = max(zones, key=lambda z: z['w']*z['h'])
-            box_center_y = main_z['y'] + (main_z['h'] / 2)
-            margin_v = video_height - box_center_y - 20
+            # Marge basse (MarginV) pour coller au bas du rectangle noir
+            margin_v = video_height - (main_z['y'] + main_z['h']) + 5
             if margin_v < 10: margin_v = 10
+            # Marges gauche/droite pour FORCER le texte a rester dans la boite
+            margin_l = main_z['x'] + 10
+            margin_r = video_width - (main_z['x'] + main_z['w']) + 10
         else:
             print("[Remaster] Aucun texte detecte. Utilisation de la zone de sous-titres par defaut.")
-            video = ffmpeg.filter(video, 'drawbox', x='(iw-w)/2', y='ih*0.75', width='iw*0.85', height='ih*0.15', color='black@0.95', t='fill')
+            video = ffmpeg.filter(video, 'drawbox', x='(iw-w)/2', y='ih*0.75', width='iw*0.85', height='ih*0.15', color='black@1.0', t='fill')
             margin_v = int(video_height * 0.17) if video_height else 120
+            margin_l = int(video_width * 0.075) if video_width else 40
+            margin_r = margin_l
             
         # Sous-titres VTT
         vtt_safe = tts_vtt.replace('\\', '/')
         vtt_safe = vtt_safe.replace(':', '\\:')
-        video = ffmpeg.filter(video, 'subtitles', filename=vtt_safe, force_style=f'FontSize=16,PrimaryColour=&H00FFFFFF,MarginV={int(margin_v)},Alignment=2')
+        # WrapStyle=2 garantit que ca coupe intelligemment sans depasser les marges
+        style = f'FontSize=14,PrimaryColour=&H00FFFFFF,MarginV={int(margin_v)},MarginL={int(margin_l)},MarginR={int(margin_r)},Alignment=2,WrapStyle=2'
+        video = ffmpeg.filter(video, 'subtitles', filename=vtt_safe, force_style=style)
         
         # Mixage Audio
         audio_no_vocals = ffmpeg.input(no_vocals_wav).audio
@@ -424,14 +433,14 @@ def detect_text_zones(video_path):
     print(f"[OCR] Analyse de la video pour detecter le texte : {video_path}")
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        return [], 1920
+        return [], 1080, 1920
         
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
     if total_frames == 0:
-        return [], height
+        return [], width, height
         
     sample_indices = [int(total_frames * i / 6) for i in range(1, 6)]
     boxes = []
@@ -457,7 +466,7 @@ def detect_text_zones(video_path):
     cap.release()
     
     if not boxes:
-        return [], height
+        return [], width, height
         
     top_boxes = [b for b in boxes if b[1] < height / 2]
     bottom_boxes = [b for b in boxes if b[1] >= height / 2]
@@ -481,4 +490,4 @@ def detect_text_zones(video_path):
             'x': min_x, 'y': min_y, 'w': max_x - min_x, 'h': max_y - min_y
         })
         
-    return merged_zones, height
+    return merged_zones, width, height
