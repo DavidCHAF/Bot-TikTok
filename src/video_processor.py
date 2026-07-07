@@ -7,7 +7,7 @@ import yt_dlp
 import ffmpeg
 
 def download_video(url: str, output_dir: str) -> str:
-    """Télécharge une vidéo via yt-dlp avec un VRAI fichier cookies.txt."""
+    """TÃ©lÃ©charge une vidÃ©o via yt-dlp avec un VRAI fichier cookies.txt."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
@@ -16,8 +16,8 @@ def download_video(url: str, output_dir: str) -> str:
     cookie_path = os.path.join(project_root, 'cookies.txt')
     
     ydl_opts = {
-        # On force H264 (avc1) et on limite la taille à 1080p vertical (hauteur <= 1920) 
-        # pour éviter que YouTube nous envoie du 4K AV1 impossible à décoder sur un petit CPU.
+        # On force H264 (avc1) et on limite la taille Ã  1080p vertical (hauteur <= 1920) 
+        # pour Ã©viter que YouTube nous envoie du 4K AV1 impossible Ã  dÃ©coder sur un petit CPU.
         'format': 'bestvideo[height<=1920][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[height<=1920][ext=mp4]+bestaudio[ext=m4a]/best[height<=1920]/best',
         'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
         'quiet': False,
@@ -28,11 +28,11 @@ def download_video(url: str, output_dir: str) -> str:
     }
     
     try:
-        print(f"🔧 [DEBUG] Lancement yt-dlp pour {url}...")
+        print(f"ðŸ”§ [DEBUG] Lancement yt-dlp pour {url}...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            print("🔧 [DEBUG] YoutubeDL instance créée. Extraction info...")
+            print("ðŸ”§ [DEBUG] YoutubeDL instance crÃ©Ã©e. Extraction info...")
             info_dict = ydl.extract_info(url, download=True)
-            print("🔧 [DEBUG] Extraction terminée.")
+            print("ðŸ”§ [DEBUG] Extraction terminÃ©e.")
             video_id = info_dict.get('id', 'video')
             ext = info_dict.get('ext', 'mp4')
             return os.path.join(output_dir, f"{video_id}.{ext}")
@@ -54,30 +54,30 @@ async def get_video_duration(input_path: str) -> float:
 
 async def process_video(input_path: str, output_path: str, progress_callback=None) -> bool:
     """
-    Applique des filtres discrets via FFmpeg pour contourner la détection.
+    Applique des filtres discrets via FFmpeg pour contourner la dÃ©tection.
     """
     try:
-        print(f"🔧 [DEBUG] Démarrage FFmpeg : {input_path} -> {output_path}")
+        print(f"ðŸ”§ [DEBUG] DÃ©marrage FFmpeg : {input_path} -> {output_path}")
         duration = await get_video_duration(input_path)
         
-        # Rotation aléatoire très légère (-1 à 1 degré max)
+        # Rotation alÃ©atoire trÃ¨s lÃ©gÃ¨re (-1 Ã  1 degrÃ© max)
         rotation_deg = random.uniform(-1.0, 1.0)
         stream = ffmpeg.input(input_path)
         video = stream.video
         audio = stream.audio
         
-        # 0. Redimensionnement "Crop to Fill" pour forcer le 9:16 parfait sans écrasement
+        # 0. Redimensionnement "Crop to Fill" pour forcer le 9:16 parfait sans Ã©crasement
         video = ffmpeg.filter(video, 'scale', w=1080, h=1920, force_original_aspect_ratio='increase')
         video = ffmpeg.filter(video, 'crop', 1080, 1920)
         
-        # 1. Ajustement colorimétrique imperceptible
+        # 1. Ajustement colorimÃ©trique imperceptible
         video = ffmpeg.filter(video, 'eq', brightness=0.01, contrast=1.01, saturation=1.02)
         
-        # 2. Accélération de 1% (Bypass redoutable)
+        # 2. AccÃ©lÃ©ration de 1% (Bypass redoutable)
         video = ffmpeg.filter(video, 'setpts', '0.99*PTS')
         audio = ffmpeg.filter(audio, 'atempo', '1.01')
         
-        # 3. Bruit léger sur la luminance
+        # 3. Bruit lÃ©ger sur la luminance
         video = ffmpeg.filter(video, 'noise', c0s=1, c0f='t+u')
         
         # Assemblage et encodage
@@ -97,10 +97,10 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
         
         args = out.compile()
         
-        print(f"🔧 [DEBUG] Lancement async de FFmpeg. Durée totale: {duration}s")
+        print(f"ðŸ”§ [DEBUG] Lancement async de FFmpeg. DurÃ©e totale: {duration}s")
         process = await asyncio.create_subprocess_exec(
             *args,
-            stdout=asyncio.subprocess.DEVNULL, # Empêche le deadlock du buffer stdout
+            stdout=asyncio.subprocess.DEVNULL, # EmpÃªche le deadlock du buffer stdout
             stderr=asyncio.subprocess.PIPE
         )
         
@@ -138,7 +138,7 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
                             pass # Ignorer les erreurs Telegram limit
                         last_update_time = time.time()
                     
-                    # On évite d'accumuler un buffer géant en mémoire, on garde juste la fin
+                    # On Ã©vite d'accumuler un buffer gÃ©ant en mÃ©moire, on garde juste la fin
                     buffer = buffer[-200:]
                         
         await process.wait()
@@ -149,10 +149,14 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
                     await progress_callback(100)
                 except:
                     pass
-            print(f"\n🔧 [DEBUG] FFmpeg a terminé avec succès.")
+            print(f"\nðŸ”§ [DEBUG] FFmpeg a terminÃ© avec succÃ¨s.")
             return True
         else:
             stderr_out = "".join(full_stderr)
+            print(f"\nâŒ Erreur FFmpeg (Code {process.returncode}):\n{stderr_out}")
+            return False
+            
+    except Exception as e:
             print(f"\n❌ Erreur FFmpeg (Code {process.returncode}):\n{stderr_out}")
             return False
             
@@ -163,11 +167,11 @@ import src.ai_remaster as ai_remaster
 
 async def remaster_video_full_pipeline(input_path: str, output_path: str, progress_callback=None) -> bool:
     try:
-        print(f"?? [Remaster] D�marrage du pipeline IA pour {input_path}...")
+        print(f"[Remaster] Demarrage du pipeline IA pour {input_path}...")
         work_dir = os.path.dirname(input_path)
         basename = os.path.splitext(os.path.basename(input_path))[0]
         
-        # 1. S�paration Audio (Demucs)
+        # 1. Separation Audio (Demucs)
         if progress_callback: await progress_callback(10)
         vocals_wav, no_vocals_wav = await ai_remaster.separate_audio(input_path, work_dir)
         
@@ -179,10 +183,10 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         if progress_callback: await progress_callback(60)
         new_script = ai_remaster.paraphrase_text(transcript)
         if not new_script:
-            print("?? [Remaster] Impossible de paraphraser. Fallback au script original.")
+            print("[Remaster] Impossible de paraphraser. Fallback au script original.")
             new_script = transcript
             
-        # 4. G�n�ration TTS + Sous-titres
+        # 4. Generation TTS + Sous-titres
         if progress_callback: await progress_callback(70)
         tts_audio = os.path.join(work_dir, f"{basename}_tts.mp3")
         tts_vtt = os.path.join(work_dir, f"{basename}_tts.vtt")
@@ -193,7 +197,7 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             
         # 5. Montage FFmpeg (Incrustation VTT, Mixage Audio, Bande Noire)
         if progress_callback: await progress_callback(85)
-        print("?? [Remaster] Assemblage FFmpeg final...")
+        print("[Remaster] Assemblage FFmpeg final...")
         
         # Utilisation de ffmpeg-python pour le mixage
         video = ffmpeg.input(input_path).video
@@ -201,7 +205,7 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         video = ffmpeg.filter(video, 'drawbox', y='ih-ih/4', width='iw', height='ih/4', color='black', t='fill')
         
         # Sous-titres VTT
-        # Chemin absolu converti pour ffmpeg sous Windows (remplacer \ par / et �chapper les :)
+        # Chemin absolu converti pour ffmpeg sous Windows/Linux (remplacer \ par / et echapper les :)
         vtt_safe = tts_vtt.replace('\\', '/')
         vtt_safe = vtt_safe.replace(':', '\\:')
         video = ffmpeg.filter(video, 'subtitles', filename=vtt_safe, force_style='FontSize=24,PrimaryColour=&H00FFFFFF,MarginV=50')
@@ -217,7 +221,7 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             output_path, 
             vcodec='libx264', 
             acodec='aac',
-            shortest=None # Coupe � la vid�o ou audio la plus courte
+            shortest=None # Coupe a la video ou audio la plus courte
         ).overwrite_output().global_args('-nostdin')
         
         process = await asyncio.create_subprocess_exec(
@@ -231,9 +235,9 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             if progress_callback: await progress_callback(100)
             return True
         else:
-            print(f"? [Remaster] Erreur FFmpeg : {stderr.decode()}")
+            print(f"[Remaster] Erreur FFmpeg : {stderr.decode()}")
             return False
             
     except Exception as e:
-        print(f"? [Remaster] Erreur critique : {e}")
+        print(f"[Remaster] Erreur critique : {e}")
         return False
