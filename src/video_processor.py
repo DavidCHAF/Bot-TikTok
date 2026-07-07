@@ -336,6 +336,10 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         if progress_callback: await progress_callback(40)
         transcript = ai_remaster.transcribe_audio(vocals_wav)
         
+        if not transcript or len(transcript.strip()) < 2:
+            print("[Remaster] Aucun texte transcrit, impossible de redoubler la video.")
+            return False
+        
         # 3. Paraphrase Gemini
         if progress_callback: await progress_callback(60)
         new_script = ai_remaster.paraphrase_text(transcript)
