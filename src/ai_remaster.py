@@ -95,7 +95,17 @@ SCRIPT ORIGINAL:
         return response.text.strip()
     except Exception as e:
         print(f"❌ [Gemini] Erreur API: {e}")
-        return transcript # Fallback on original text if API fails
+        # En cas d'erreur, affichons la liste des modeles disponibles pour cette cle
+        try:
+            print("🔍 [Gemini] Recherche des modeles disponibles pour cette cle API...")
+            models = client.models.list()
+            model_names = [m.name for m in models]
+            print(f"💡 [Gemini] Modeles disponibles : {', '.join(model_names)}")
+        except Exception as list_e:
+            print(f"❌ [Gemini] Impossible de lister les modeles : {list_e}")
+            
+        print("⚠️ [Gemini] Echec de la paraphrase. Utilisation du texte original.")
+        return transcript
 
 async def generate_tts(text: str, output_audio_path: str, output_vtt_path: str, voice: str = "fr-FR-HenriNeural"):
     """
