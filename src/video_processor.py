@@ -41,9 +41,14 @@ def download_video(url: str, output_dir: str) -> str:
 
 async def get_video_duration(input_path: str) -> float:
     try:
+        # On capture stderr pour voir s'il y a une erreur ffprobe
         probe = await asyncio.to_thread(ffmpeg.probe, input_path)
         return float(probe['format']['duration'])
-    except Exception:
+    except ffmpeg.Error as e:
+        print(f"Erreur ffprobe: {e.stderr.decode('utf-8', errors='ignore') if e.stderr else str(e)}")
+        return 0.0
+    except Exception as e:
+        print(f"Erreur ffprobe inattendue: {e}")
         return 0.0
 
 async def process_video(input_path: str, output_path: str, progress_callback=None) -> bool:
@@ -96,12 +101,15 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
         time_regex = re.compile(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})")
         last_update_time = time.time()
         
+        full_stderr = []
+        
         while True:
             line = await process.stderr.readline()
             if not line:
                 break
                 
             line_str = line.decode('utf-8', errors='ignore')
+            full_stderr.append(line_str)
             
             if duration > 0 and progress_callback:
                 match = time_regex.search(line_str)
@@ -128,8 +136,8 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
             print(f"🔧 [DEBUG] FFmpeg a terminé avec succès.")
             return True
         else:
-            stderr_out = await process.stderr.read()
-            print(f"Erreur FFmpeg: {stderr_out.decode('utf-8', errors='ignore')}")
+            stderr_out = "".join(full_stderr)
+            print(f"❌ Erreur FFmpeg (Code {process.returncode}):\n{stderr_out}")
             return False
             
     except Exception as e:
