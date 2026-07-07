@@ -159,3 +159,81 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
     except Exception as e:
         print(f"ðŸ”§ [DEBUG] Exception inattendue dans process_video : {e}")
         return False
+import src.ai_remaster as ai_remaster
+
+async def remaster_video_full_pipeline(input_path: str, output_path: str, progress_callback=None) -> bool:
+    try:
+        print(f"?? [Remaster] Démarrage du pipeline IA pour {input_path}...")
+        work_dir = os.path.dirname(input_path)
+        basename = os.path.splitext(os.path.basename(input_path))[0]
+        
+        # 1. Séparation Audio (Demucs)
+        if progress_callback: await progress_callback(10)
+        vocals_wav, no_vocals_wav = await ai_remaster.separate_audio(input_path, work_dir)
+        
+        # 2. Transcription
+        if progress_callback: await progress_callback(40)
+        transcript = ai_remaster.transcribe_audio(vocals_wav)
+        
+        # 3. Paraphrase Gemini
+        if progress_callback: await progress_callback(60)
+        new_script = ai_remaster.paraphrase_text(transcript)
+        if not new_script:
+            print("?? [Remaster] Impossible de paraphraser. Fallback au script original.")
+            new_script = transcript
+            
+        # 4. Génération TTS + Sous-titres
+        if progress_callback: await progress_callback(70)
+        tts_audio = os.path.join(work_dir, f"{basename}_tts.mp3")
+        tts_vtt = os.path.join(work_dir, f"{basename}_tts.vtt")
+        
+        success = await ai_remaster.generate_tts(new_script, tts_audio, tts_vtt)
+        if not success:
+            return False
+            
+        # 5. Montage FFmpeg (Incrustation VTT, Mixage Audio, Bande Noire)
+        if progress_callback: await progress_callback(85)
+        print("?? [Remaster] Assemblage FFmpeg final...")
+        
+        # Utilisation de ffmpeg-python pour le mixage
+        video = ffmpeg.input(input_path).video
+        # Bande noire en bas pour cacher les anciens sous-titres (y=H-H/4, h=H/4)
+        video = ffmpeg.filter(video, 'drawbox', y='ih-ih/4', width='iw', height='ih/4', color='black', t='fill')
+        
+        # Sous-titres VTT
+        # Chemin absolu converti pour ffmpeg sous Windows (remplacer \ par / et échapper les :)
+        vtt_safe = tts_vtt.replace('\\', '/')
+        vtt_safe = vtt_safe.replace(':', '\\:')
+        video = ffmpeg.filter(video, 'subtitles', filename=vtt_safe, force_style='FontSize=24,PrimaryColour=&H00FFFFFF,MarginV=50')
+        
+        # Mixage Audio
+        audio_no_vocals = ffmpeg.input(no_vocals_wav).audio
+        audio_tts = ffmpeg.input(tts_audio).audio
+        audio_mix = ffmpeg.filter([audio_no_vocals, audio_tts], 'amix', inputs=2, duration='longest')
+        
+        out = ffmpeg.output(
+            video, 
+            audio_mix, 
+            output_path, 
+            vcodec='libx264', 
+            acodec='aac',
+            shortest=None # Coupe à la vidéo ou audio la plus courte
+        ).overwrite_output().global_args('-nostdin')
+        
+        process = await asyncio.create_subprocess_exec(
+            *out.compile(),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE
+        )
+        _, stderr = await process.communicate()
+        
+        if process.returncode == 0:
+            if progress_callback: await progress_callback(100)
+            return True
+        else:
+            print(f"? [Remaster] Erreur FFmpeg : {stderr.decode()}")
+            return False
+            
+    except Exception as e:
+        print(f"? [Remaster] Erreur critique : {e}")
+        return False

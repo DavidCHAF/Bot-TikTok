@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQuer
 
 from src.scraper_youtube import scrape_youtube_shorts, get_youtube_stats
 from src.analyzer import get_top_trends
-from src.video_processor import download_video, process_video
+from src.video_processor import download_video, process_video, remaster_video_full_pipeline
 
 # Token via environment variable
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
@@ -220,7 +220,7 @@ async def execute_t2_logic(context: ContextTypes.DEFAULT_TYPE, chat_id: int, nic
                         except Exception:
                             pass
                 
-                success = await process_video(input_video, output_video, update_progress)
+                success = await remaster_video_full_pipeline(input_video, output_video, update_progress)
                 
                 if success and os.path.exists(output_video):
                     print(f"🔧 [DEBUG] Envoi de la vidéo traitée vers Telegram...")
