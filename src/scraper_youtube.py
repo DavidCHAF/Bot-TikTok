@@ -114,6 +114,7 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
             print(f"📡 Nouvelle requête API: {query}")
             next_page_token = None
             published_before = None
+            retry_count_429 = 0
             
             while len(videos) < max_videos:
                 try:
@@ -256,17 +257,30 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                             break
                         
                 except HttpError as e:
-                    # Gestion de l'erreur de Quota (403, 429) ou Clé Invalide (400)
+                    # Gestion de l'erreur 429 (Rate Limit - Trop de requêtes)
+                    if e.resp.status == 429:
+                        retry_count_429 += 1
+                        if retry_count_429 <= 3:
+                            print(f"⚠️ Rate Limit (429) Google détecté. Pause de 5s (Essai {retry_count_429}/3)...")
+                            time.sleep(5)
+                            continue # On réessaye la même clé
+                        else:
+                            print("❌ Rate Limit persistant, on va essayer une autre clé...")
+                            retry_count_429 = 0
+                            
+                    # Rotation de clé pour Quota épuisé (403), Clé invalide (400), ou Rate Limit persistant
                     if e.resp.status in [400, 403, 429]:
-                        print(f"⚠️ Erreur ou Quota épuisé pour la clé API n°{current_key_idx + 1} (Code {e.resp.status}).")
+                        if e.resp.status != 429:
+                            print(f"⚠️ Erreur ou Quota épuisé pour la clé API n°{current_key_idx + 1} (Code {e.resp.status}).")
+                            
                         current_key_idx += 1
                         if current_key_idx < len(api_keys):
                             print(f"🔄 Passage à la clé API n°{current_key_idx + 1}...")
                             youtube = build("youtube", "v3", developerKey=api_keys[current_key_idx])
-                            continue # On relance la boucle while sans changer de mot-clé
+                            continue # On relance la boucle
                         else:
-                            print("❌ Toutes les clés API sont épuisées ou invalides !")
-                            return videos[:max_videos] # On quitte tout et on renvoie ce qu'on a
+                            print("❌ Toutes les clés API sont épuisées ou bloquées !")
+                            return videos[:max_videos]
                     else:
                         print(f"❌ Erreur API YouTube non liée au quota: {e}")
                         break
@@ -317,7 +331,12 @@ def get_youtube_stats(video_ids: list) -> list:
                 })
         except HttpError as e:
             if e.resp.status in [400, 403, 429]:
-                print(f"⚠️ Stats: Erreur/Quota épuisé pour la clé n°{current_key_idx + 1} (Code {e.resp.status}).")
+                if e.resp.status == 429:
+                    print(f"⚠️ Stats: Rate Limit (429) détecté. Pause de 5s...")
+                    time.sleep(5)
+                else:
+                    print(f"⚠️ Stats: Erreur/Quota épuisé pour la clé n°{current_key_idx + 1} (Code {e.resp.status}).")
+                
                 current_key_idx += 1
                 if current_key_idx < len(api_keys):
                     print(f"🔄 Stats: Passage à la clé n°{current_key_idx + 1}...")
