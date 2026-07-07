@@ -69,7 +69,7 @@ def paraphrase_text(transcript: str) -> str:
         return ""
         
     print(f"🧠 [Gemini] Paraphrase sémantique en cours...")
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-pro')
     prompt = f"""Tu es un expert en création de contenu viral sur TikTok.
 Voici le script exact d'une vidéo virale. Réécris ce script pour dire la même chose avec la même intensité et le même aspect captivant, mais en changeant complètement le vocabulaire et la structure des phrases pour que ce soit un script 100% original.
 Ne rajoute aucune introduction ou conclusion, juste le script pur à lire à haute voix.
@@ -88,7 +88,12 @@ async def generate_tts(text: str, output_audio_path: str, output_vtt_path: str, 
     """
     Génère la voix TTS et les sous-titres parfaitement synchronisés (.vtt) via edge-tts.
     """
-    if not text:
+    # Nettoyage des caracteres bizarres qui font planter edge-tts
+    import re
+    clean_text = re.sub(r'[^\w\s.,!?\']', '', text).strip()
+    
+    if len(clean_text) < 2:
+        print(f"❌ [Edge-TTS] Texte vide ou invalide apres nettoyage. Annulation TTS.")
         return False
         
     print(f"🗣️ [Edge-TTS] Génération de la nouvelle voix et des sous-titres...")
