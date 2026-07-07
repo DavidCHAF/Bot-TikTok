@@ -369,17 +369,26 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         if zones:
             print(f"[Remaster] {len(zones)} zones de texte detectees. Masquage...")
             for z in zones:
-                # color='black@1.0' pour un rectangle 100% noir sans transparence
-                video = ffmpeg.filter(video, 'drawbox', x=z['x'], y=z['y'], width=z['w'], height=z['h'], color='black@1.0', t='fill')
+                # Ajout de marges de securite au rectangle noir pour etre sur qu'il couvre bien l'ancien texte
+                pad_x = max(0, z['x'] - 30)
+                pad_y = max(0, z['y'] - 20)
+                pad_w = min(video_width - pad_x, z['w'] + 60)
+                pad_h = z['h'] + 40
+                video = ffmpeg.filter(video, 'drawbox', x=pad_x, y=pad_y, width=pad_w, height=pad_h, color='black@1.0', t='fill')
             
             # Placer le sous-titre dans la zone la plus large
             main_z = max(zones, key=lambda z: z['w']*z['h'])
-            # Marge basse (MarginV) pour coller au bas du rectangle noir
-            margin_v = video_height - (main_z['y'] + main_z['h']) + 5
+            pad_x = max(0, main_z['x'] - 30)
+            pad_y = max(0, main_z['y'] - 20)
+            pad_w = min(video_width - pad_x, main_z['w'] + 60)
+            pad_h = main_z['h'] + 40
+            
+            # Marge basse (MarginV)
+            margin_v = video_height - (pad_y + pad_h) + 10
             if margin_v < 10: margin_v = 10
-            # Marges gauche/droite pour FORCER le texte a rester dans la boite
-            margin_l = main_z['x'] + 10
-            margin_r = video_width - (main_z['x'] + main_z['w']) + 10
+            # Marges pour bloquer le texte
+            margin_l = pad_x + 15
+            margin_r = video_width - (pad_x + pad_w) + 15
         else:
             print("[Remaster] Aucun texte detecte. Utilisation de la zone de sous-titres par defaut.")
             video = ffmpeg.filter(video, 'drawbox', x='(iw-w)/2', y='ih*0.75', width='iw*0.85', height='ih*0.15', color='black@1.0', t='fill')
@@ -390,8 +399,9 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         # Sous-titres VTT
         vtt_safe = tts_vtt.replace('\\', '/')
         vtt_safe = vtt_safe.replace(':', '\\:')
-        # WrapStyle=2 garantit que ca coupe intelligemment sans depasser les marges
-        style = f'FontSize=14,PrimaryColour=&H00FFFFFF,MarginV={int(margin_v)},MarginL={int(margin_l)},MarginR={int(margin_r)},Alignment=2,WrapStyle=2'
+        # FontSize=45 pour que ce soit lisible sur mobile (14 etait microscopique sur du 1080p!)
+        # Outline=2 pour que le texte se detache bien
+        style = f'FontName=Arial,FontSize=45,PrimaryColour=&H00FFFFFF,Outline=2,MarginV={int(margin_v)},MarginL={int(margin_l)},MarginR={int(margin_r)},Alignment=2,WrapStyle=2'
         video = ffmpeg.filter(video, 'subtitles', filename=vtt_safe, force_style=style)
         
         # Mixage Audio
