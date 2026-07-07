@@ -42,7 +42,8 @@ async def yt_t1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_message(chat_id=chat_id, text=f"🔍 Début du sourcing YouTube T1 pour '{niche}'{lang_text}... Patientez.")
     
     try:
-        videos = await asyncio.to_thread(scrape_youtube_shorts, niche, 500, lang)
+        # On limite à 150 vidéos (au lieu de 500) pour ne pas exploser le quota API
+        videos = await asyncio.to_thread(scrape_youtube_shorts, niche, 150, lang)
         
         if not videos:
             await context.bot.send_message(chat_id=chat_id, text="❌ Aucune vidéo trouvée ou erreur API.")

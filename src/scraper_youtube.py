@@ -258,26 +258,30 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                             break
                         
                 except HttpError as e:
-                    # Gestion de l'erreur 429 (Rate Limit - Trop de requêtes)
-                    if e.resp.status == 429:
-                        try:
-                            error_details = e.content.decode('utf-8')
-                            print(f"⚠️ [Détail de l'erreur 429 Google] : {error_details}")
-                        except:
-                            pass
-                            
-                        retry_count_429 += 1
-                        if retry_count_429 <= 3:
-                            print(f"⚠️ Rate Limit (429) Google détecté. Pause de 5s (Essai {retry_count_429}/3)...")
-                            time.sleep(5)
-                            continue # On réessaye la même clé
-                        else:
-                            print("❌ Rate Limit persistant, on va essayer une autre clé...")
-                            retry_count_429 = 0
-                            
-                    # Rotation de clé pour Quota épuisé (403), Clé invalide (400), ou Rate Limit persistant
                     if e.resp.status in [400, 403, 429]:
-                        if e.resp.status != 429:
+                        is_daily_quota = False
+                        if e.resp.status == 429:
+                            try:
+                                error_details = e.content.decode('utf-8')
+                                print(f"⚠️ [Détail de l'erreur 429 Google] : {error_details}")
+                                # Google renvoie parfois 429 pour le quota journalier au lieu de 403
+                                if "Search Queries per day" in error_details or "quota" in error_details.lower():
+                                    is_daily_quota = True
+                            except:
+                                pass
+                                
+                        if e.resp.status == 429 and not is_daily_quota:
+                            retry_count_429 += 1
+                            if retry_count_429 <= 3:
+                                print(f"⚠️ Rate Limit (429) Google détecté. Pause de 5s (Essai {retry_count_429}/3)...")
+                                time.sleep(5)
+                                continue # On réessaye la même clé
+                            else:
+                                print("❌ Rate Limit persistant, on va essayer une autre clé...")
+                                retry_count_429 = 0
+                                
+                        # Rotation de clé immédiate pour Quota épuisé (403 ou 429-Daily), Clé invalide (400), ou Rate Limit persistant
+                        if e.resp.status != 429 or is_daily_quota:
                             print(f"⚠️ Erreur ou Quota épuisé pour la clé API n°{current_key_idx + 1} (Code {e.resp.status}).")
                             
                         current_key_idx += 1
