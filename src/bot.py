@@ -54,7 +54,7 @@ async def yt_t1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             v['t1_timestamp'] = current_time
             
         with open(csv_filename, mode='w', newline='', encoding='utf-8') as file:
-            writer = csv.DictWriter(file, fieldnames=["id", "url", "title", "views", "likes", "comments", "shares", "create_time", "t1_timestamp"])
+            writer = csv.DictWriter(file, fieldnames=["id", "url", "title", "description", "views", "likes", "comments", "shares", "create_time", "t1_timestamp"])
             writer.writeheader()
             writer.writerows(videos)
             
@@ -223,11 +223,28 @@ async def execute_t2_logic(context: ContextTypes.DEFAULT_TYPE, chat_id: int, nic
                 
                 if success and os.path.exists(output_video):
                     print(f"🔧 [DEBUG] Envoi de la vidéo traitée vers Telegram...")
+                    
+                    try:
+                        probe = await asyncio.to_thread(ffmpeg.probe, output_video)
+                        video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+                        if video_stream:
+                            res_w = video_stream['width']
+                            res_h = video_stream['height']
+                            await context.bot.send_message(chat_id=chat_id, text=f"✅ Résolution finale générée : {res_w}x{res_h} (9:16)")
+                    except Exception as e:
+                        pass
+                        
                     with open(output_video, 'rb') as video_file:
+                        desc = trend.get('description', '')
+                        if len(desc) > 700:
+                            desc = desc[:700] + "..."
+                        
+                        final_caption = f"🎬 Voici ton Top {i+1} ({trend['c_r']:.1f}% croissance)\n\n📝 Description originale:\n{desc}"
+                        
                         await context.bot.send_video(
                             chat_id=chat_id, 
                             video=video_file, 
-                            caption=f"🎬 Voici ton Top {i+1} ({trend['c_r']:.1f}% croissance)",
+                            caption=final_caption,
                             read_timeout=120,
                             write_timeout=120,
                             connect_timeout=120

@@ -222,6 +222,7 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                             "id": stat["id"],
                             "url": f"https://www.youtube.com/shorts/{stat['id']}",
                             "title": title,
+                            "description": description,
                             "views": int(stats.get("viewCount", 0)),
                             "likes": int(stats.get("likeCount", 0)),
                             "comments": int(stats.get("commentCount", 0)),
@@ -255,16 +256,16 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                             break
                         
                 except HttpError as e:
-                    # Gestion de l'erreur de Quota (403 ou 429)
-                    if e.resp.status in [403, 429]:
-                        print(f"⚠️ Quota épuisé pour la clé API n°{current_key_idx + 1}.")
+                    # Gestion de l'erreur de Quota (403, 429) ou Clé Invalide (400)
+                    if e.resp.status in [400, 403, 429]:
+                        print(f"⚠️ Erreur ou Quota épuisé pour la clé API n°{current_key_idx + 1} (Code {e.resp.status}).")
                         current_key_idx += 1
                         if current_key_idx < len(api_keys):
                             print(f"🔄 Passage à la clé API n°{current_key_idx + 1}...")
                             youtube = build("youtube", "v3", developerKey=api_keys[current_key_idx])
                             continue # On relance la boucle while sans changer de mot-clé
                         else:
-                            print("❌ Toutes les clés API sont épuisées pour aujourd'hui !")
+                            print("❌ Toutes les clés API sont épuisées ou invalides !")
                             return videos[:max_videos] # On quitte tout et on renvoie ce qu'on a
                     else:
                         print(f"❌ Erreur API YouTube non liée au quota: {e}")
@@ -307,6 +308,7 @@ def get_youtube_stats(video_ids: list) -> list:
                     "id": stat["id"],
                     "url": f"https://www.youtube.com/shorts/{stat['id']}",
                     "title": snippet.get("title", ""),
+                    "description": snippet.get("description", ""),
                     "views": int(stats.get("viewCount", 0)),
                     "likes": int(stats.get("likeCount", 0)),
                     "comments": int(stats.get("commentCount", 0)),
@@ -314,8 +316,8 @@ def get_youtube_stats(video_ids: list) -> list:
                     "create_time": snippet.get("publishedAt", "")
                 })
         except HttpError as e:
-            if e.resp.status in [403, 429]:
-                print(f"⚠️ Stats: Quota épuisé pour la clé n°{current_key_idx + 1}.")
+            if e.resp.status in [400, 403, 429]:
+                print(f"⚠️ Stats: Erreur/Quota épuisé pour la clé n°{current_key_idx + 1} (Code {e.resp.status}).")
                 current_key_idx += 1
                 if current_key_idx < len(api_keys):
                     print(f"🔄 Stats: Passage à la clé n°{current_key_idx + 1}...")
@@ -334,6 +336,7 @@ def get_youtube_stats(video_ids: list) -> list:
                                 "id": stat["id"],
                                 "url": f"https://www.youtube.com/shorts/{stat['id']}",
                                 "title": snippet.get("title", ""),
+                                "description": snippet.get("description", ""),
                                 "views": int(stats.get("viewCount", 0)),
                                 "likes": int(stats.get("likeCount", 0)),
                                 "comments": int(stats.get("commentCount", 0)),
