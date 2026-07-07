@@ -94,7 +94,7 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
         print(f"🔧 [DEBUG] Lancement async de FFmpeg. Durée totale: {duration}s")
         process = await asyncio.create_subprocess_exec(
             *args,
-            stdout=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL, # Empêche le deadlock du buffer stdout
             stderr=asyncio.subprocess.PIPE
         )
         
@@ -110,6 +110,8 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
                 
             line_str = line.decode('utf-8', errors='ignore')
             full_stderr.append(line_str)
+            # Afficher dans le terminal pour voir si ça encode doucement ou si c'est vraiment figé
+            print(f"FFMPEG: {line_str.strip()}") 
             
             if duration > 0 and progress_callback:
                 match = time_regex.search(line_str)
