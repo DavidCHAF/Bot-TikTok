@@ -67,7 +67,8 @@ def process_video(input_path: str, output_path: str) -> bool:
             map_metadata='-1', 
             vcodec='libx264', 
             crf=23, 
-            preset='fast',
+            preset='ultrafast',
+            threads=1,
             acodec='aac'
         )
         
