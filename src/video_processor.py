@@ -60,24 +60,32 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
         print(f"🔧 [DEBUG] Démarrage FFmpeg : {input_path} -> {output_path}")
         duration = await get_video_duration(input_path)
         
-        # Rotation aléatoire entre -1.5 et 1.5 degrés
-        rotation_deg = random.uniform(-1.5, 1.5)
+        # Rotation aléatoire très légère (-1 à 1 degré max)
+        rotation_deg = random.uniform(-1.0, 1.0)
         angle_rad = rotation_deg * (3.14159 / 180.0)
         
         stream = ffmpeg.input(input_path)
         video = stream.video
         audio = stream.audio
         
-        # 0. Redimensionnement à 1080p vertical (TikTok max) 
-        video = ffmpeg.filter(video, 'scale', w='min(1080,iw)', h='min(1920,ih)', force_original_aspect_ratio='decrease')
+        # 0. Redimensionnement exact à 1080x1920 (Format TikTok)
+        video = ffmpeg.filter(video, 'scale', 1080, 1920)
         
-        # 1. Rotation subtile
-        video = ffmpeg.filter(video, 'rotate', a=angle_rad)
+        # 1. Rotation très légère (ow/oh fixe la taille, le fond devient noir sur les bords)
+        video = ffmpeg.filter(video, 'rotate', a=angle_rad, ow='iw', oh='ih')
         
-        # 2. Crop pour enlever les filigranes
-        video = ffmpeg.filter(video, 'crop', w='floor(iw*0.84/2)*2', h='floor(ih*0.84/2)*2', x='floor(iw*0.08/2)*2', y='floor(ih*0.08/2)*2')
+        # 2. Zoom de 3.5% pour cacher parfaitement les triangles noirs de la rotation de 1 degré
+        video = ffmpeg.filter(video, 'scale', 'iw*1.035', 'ih*1.035')
+        video = ffmpeg.filter(video, 'crop', 1080, 1920)
         
-        # 3. Bruit léger (Optimisé pour petit CPU)
+        # 3. Ajustement colorimétrique imperceptible
+        video = ffmpeg.filter(video, 'eq', brightness=0.01, contrast=1.01, saturation=1.02)
+        
+        # 2. Accélération de 1% (Modifie la durée, la bande son et le hash global de la vidéo)
+        video = ffmpeg.filter(video, 'setpts', '0.99*PTS')
+        audio = ffmpeg.filter(audio, 'atempo', '1.01')
+        
+        # 3. Bruit léger sur la luminance
         video = ffmpeg.filter(video, 'noise', c0s=1, c0f='t+u')
         
         # Assemblage et encodage
