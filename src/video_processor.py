@@ -394,13 +394,60 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             margin_l = pad_x
             margin_r = pad_x
             
-        # Sous-titres VTT
-        vtt_abs = os.path.abspath(tts_vtt)
-        vtt_safe = vtt_abs.replace('\\', '/').replace(':', '\\:')
+        # Conversion VTT vers ASS pour un controle absolu du rendu
+        ass_path = tts_vtt.replace(".vtt", ".ass")
+        try:
+            with open(tts_vtt, 'r', encoding='utf-8') as f:
+                vtt_lines = f.readlines()
+            
+            ass_content = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {video_width}
+PlayResY: {video_height}
+WrapStyle: 1
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,50,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,0,2,{int(margin_l)},{int(margin_r)},{int(margin_v)},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+            def convert_time(vtt_time):
+                h, m, s = vtt_time.split(':')
+                s, ms = s.split('.')
+                return f"{int(h)}:{m}:{s}.{ms[:2]}"
+                
+            i = 0
+            while i < len(vtt_lines):
+                line = vtt_lines[i].strip()
+                if '-->' in line:
+                    start_vtt, end_vtt = line.split(' --> ')
+                    start_ass = convert_time(start_vtt.strip())
+                    end_ass = convert_time(end_vtt.strip())
+                    
+                    text_block = []
+                    i += 1
+                    while i < len(vtt_lines) and vtt_lines[i].strip() != '':
+                        text_block.append(vtt_lines[i].strip())
+                        i += 1
+                    text_ass = '\\N'.join(text_block)
+                    
+                    ass_content += f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{text_ass}\n"
+                else:
+                    i += 1
+                    
+            with open(ass_path, 'w', encoding='utf-8') as f:
+                f.write(ass_content)
+        except Exception as e:
+            print(f"[Remaster] Erreur de conversion VTT vers ASS: {e}")
+            ass_path = tts_vtt # Fallback
+            
+        ass_abs = os.path.abspath(ass_path)
+        ass_safe = ass_abs.replace('\\', '/').replace(':', '\\:')
         
-        # WrapStyle=1 force le retour a la ligne intelligent
-        style = f'FontName=Arial,FontSize=45,PrimaryColour=&H00FFFFFF,Outline=2,MarginV={int(margin_v)},MarginL={int(margin_l)},MarginR={int(margin_r)},Alignment=2,WrapStyle=1'
-        video = ffmpeg.filter(video, 'subtitles', filename=vtt_safe, force_style=style)
+        # On utilise le fichier ASS genere (plus besoin de force_style)
+        video = ffmpeg.filter(video, 'subtitles', filename=ass_safe)
         
         # Mixage Audio
         audio_no_vocals = ffmpeg.input(no_vocals_wav).audio
