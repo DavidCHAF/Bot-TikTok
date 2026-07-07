@@ -260,6 +260,12 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                 except HttpError as e:
                     # Gestion de l'erreur 429 (Rate Limit - Trop de requêtes)
                     if e.resp.status == 429:
+                        try:
+                            error_details = e.content.decode('utf-8')
+                            print(f"⚠️ [Détail de l'erreur 429 Google] : {error_details}")
+                        except:
+                            pass
+                            
                         retry_count_429 += 1
                         if retry_count_429 <= 3:
                             print(f"⚠️ Rate Limit (429) Google détecté. Pause de 5s (Essai {retry_count_429}/3)...")
