@@ -7,7 +7,7 @@ google-api-python-client==2.133.0
 langdetect==1.0.9
 scrapetube==2.6.0
 faster-whisper==1.0.2
-google-generativeai
+google-genai
 edge-tts
 demucs==4.0.1
 torchcodec

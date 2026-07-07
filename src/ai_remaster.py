@@ -2,15 +2,19 @@ import os
 import asyncio
 import subprocess
 from faster_whisper import WhisperModel
-import google.generativeai as genai
+from google import genai
 
 # Configuration de Gemini
 api_key = os.getenv("GEMINI_API_KEY")
+client = None
 if not api_key:
     print("❌ [Gemini] ERREUR CRITIQUE : La variable d'environnement GEMINI_API_KEY est introuvable !")
     print("❌ [Gemini] Assurez-vous d'avoir tape : export GEMINI_API_KEY=\"VotreCle\"")
 else:
-    genai.configure(api_key=api_key)
+    try:
+        client = genai.Client(api_key=api_key)
+    except Exception as e:
+        print(f"❌ [Gemini] Erreur d'initialisation du client : {e}")
 
 async def separate_audio(input_video_path: str, output_dir: str):
     """
@@ -71,21 +75,23 @@ def paraphrase_text(transcript: str) -> str:
         print("⚠️ [Gemini] Texte trop court pour être paraphrasé.")
         return ""
         
-    if not api_key:
-        print("❌ [Gemini] Impossible de paraphraser : Clé API manquante.")
+    if not api_key or not client:
+        print("❌ [Gemini] Impossible de paraphraser : Clé API ou Client manquant.")
         return ""
         
     print(f"🧠 [Gemini] Paraphrase sémantique en cours...")
-    model = genai.GenerativeModel('gemini-1.5-flash')
     prompt = f"""Tu es un expert en création de contenu viral sur TikTok.
 Voici le script exact d'une vidéo virale. Réécris ce script pour dire la même chose avec la même intensité et le même aspect captivant, mais en changeant complètement le vocabulaire et la structure des phrases pour que ce soit un script 100% original.
 Ne rajoute aucune introduction ou conclusion, juste le script pur à lire à haute voix.
 
-Texte original:
+SCRIPT ORIGINAL:
 {transcript}
 """
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt
+        )
         return response.text.strip()
     except Exception as e:
         print(f"❌ [Gemini] Erreur API: {e}")
