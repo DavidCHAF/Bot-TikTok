@@ -227,7 +227,10 @@ async def execute_t2_logic(context: ContextTypes.DEFAULT_TYPE, chat_id: int, nic
                         await context.bot.send_video(
                             chat_id=chat_id, 
                             video=video_file, 
-                            caption=f"🎬 Voici ton Top {i+1} ({trend['c_r']:.1f}% croissance)"
+                            caption=f"🎬 Voici ton Top {i+1} ({trend['c_r']:.1f}% croissance)",
+                            read_timeout=120,
+                            write_timeout=120,
+                            connect_timeout=120
                         )
                     print(f"🔧 [DEBUG] Vidéo envoyée avec succès.")
                 else:

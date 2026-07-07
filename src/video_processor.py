@@ -68,8 +68,9 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
         video = stream.video
         audio = stream.audio
         
-        # 0. Redimensionnement exact à 1080x1920 (Format TikTok)
-        video = ffmpeg.filter(video, 'scale', 1080, 1920)
+        # 0. Redimensionnement "Crop to Fill" pour forcer le 9:16 sans AUCUN écrasement ni bande noire
+        video = ffmpeg.filter(video, 'scale', w=1080, h=1920, force_original_aspect_ratio='increase')
+        video = ffmpeg.filter(video, 'crop', 1080, 1920)
         
         # 1. Rotation très légère (ow/oh fixe la taille, le fond devient noir sur les bords)
         video = ffmpeg.filter(video, 'rotate', a=angle_rad, ow='iw', oh='ih')
