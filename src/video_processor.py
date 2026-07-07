@@ -13,7 +13,8 @@ def download_video(url: str, output_dir: str) -> str:
     cookie_path = os.path.join(project_root, 'cookies.txt')
     
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/b',
+        # On force le codec H264 (avc1) car le format AV1 (401) par défaut fige le décodage FFmpeg sur une petite VM
+        'format': 'bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
         'quiet': False,
         'verbose': True,
