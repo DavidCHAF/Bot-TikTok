@@ -6,7 +6,10 @@ import google.generativeai as genai
 
 # Configuration de Gemini
 api_key = os.getenv("GEMINI_API_KEY")
-if api_key:
+if not api_key:
+    print("❌ [Gemini] ERREUR CRITIQUE : La variable d'environnement GEMINI_API_KEY est introuvable !")
+    print("❌ [Gemini] Assurez-vous d'avoir tape : export GEMINI_API_KEY=\"VotreCle\"")
+else:
     genai.configure(api_key=api_key)
 
 async def separate_audio(input_video_path: str, output_dir: str):
@@ -66,6 +69,10 @@ def paraphrase_text(transcript: str) -> str:
     """
     if not transcript or len(transcript.strip()) < 10:
         print("⚠️ [Gemini] Texte trop court pour être paraphrasé.")
+        return ""
+        
+    if not api_key:
+        print("❌ [Gemini] Impossible de paraphraser : Clé API manquante.")
         return ""
         
     print(f"🧠 [Gemini] Paraphrase sémantique en cours...")
