@@ -91,6 +91,7 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
     youtube = build("youtube", "v3", developerKey=api_keys[current_key_idx])
     
     videos = []
+    seen_video_ids = set()
     
     # Stratégie Multi-Requêtes : Si l'API bloque une requête, on passe à la suivante
     queries = [
@@ -219,6 +220,11 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                             full_text = f"{title}. {description}"
                             if not is_correct_language(full_text, target_lang):
                                 continue
+                                
+                        # Éviter les doublons stricts
+                        if stat["id"] in seen_video_ids:
+                            continue
+                        seen_video_ids.add(stat["id"])
                     
                         videos.append({
                             "id": stat["id"],
@@ -249,8 +255,18 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                             if last_published < published_after:
                                 print(f"⚠️ Mur de l'API (limite de 2 jours) atteint pour '{query}'. Passage au mot-clé suivant...")
                                 break
-                            
-                            published_before = last_published
+                            if published_before == last_published:
+                                # Anti-boucle infinie : on recule d'une seconde manuellement
+                                try:
+                                    dt = datetime.datetime.strptime(last_published, "%Y-%m-%dT%H:%M:%SZ")
+                                    dt = dt - datetime.timedelta(seconds=1)
+                                    published_before = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                                except:
+                                    print(f"⚠️ Blocage temporel API. Passage au mot-clé suivant...")
+                                    break
+                            else:
+                                published_before = last_published
+                                
                             next_page_token = None
                             print(f"🔄 Limite atteinte pour '{query}'. Reprise dans le passé depuis : {published_before}")
                         else:
