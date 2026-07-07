@@ -106,21 +106,26 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
         last_update_time = time.time()
         
         full_stderr = []
+        buffer = ""
         
         while True:
-            line = await process.stderr.readline()
-            if not line:
+            chunk = await process.stderr.read(1024)
+            if not chunk:
                 break
                 
-            line_str = line.decode('utf-8', errors='ignore')
-            full_stderr.append(line_str)
-            # Afficher dans le terminal pour voir si ça encode doucement ou si c'est vraiment figé
-            print(f"FFMPEG: {line_str.strip()}") 
+            chunk_str = chunk.decode('utf-8', errors='ignore')
+            full_stderr.append(chunk_str)
+            
+            # Afficher dans le terminal brut
+            print(chunk_str, end='', flush=True)
+            
+            buffer += chunk_str
             
             if duration > 0 and progress_callback:
-                match = time_regex.search(line_str)
-                if match:
-                    h, m, s = match.groups()
+                matches = list(time_regex.finditer(buffer))
+                if matches:
+                    last_match = matches[-1]
+                    h, m, s = last_match.groups()
                     current_time_sec = int(h) * 3600 + int(m) * 60 + float(s)
                     percent = min(100, int((current_time_sec / duration) * 100))
                     
@@ -130,6 +135,9 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
                         except Exception as e:
                             pass # Ignorer les erreurs Telegram limit
                         last_update_time = time.time()
+                    
+                    # On évite d'accumuler un buffer géant en mémoire, on garde juste la fin
+                    buffer = buffer[-200:]
                         
         await process.wait()
         
@@ -139,11 +147,11 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
                     await progress_callback(100)
                 except:
                     pass
-            print(f"🔧 [DEBUG] FFmpeg a terminé avec succès.")
+            print(f"\n🔧 [DEBUG] FFmpeg a terminé avec succès.")
             return True
         else:
             stderr_out = "".join(full_stderr)
-            print(f"❌ Erreur FFmpeg (Code {process.returncode}):\n{stderr_out}")
+            print(f"\n❌ Erreur FFmpeg (Code {process.returncode}):\n{stderr_out}")
             return False
             
     except Exception as e:
