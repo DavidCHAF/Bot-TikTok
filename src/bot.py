@@ -198,6 +198,10 @@ async def execute_t2_logic(context: ContextTypes.DEFAULT_TYPE, chat_id: int, nic
                 await context.bot.send_message(chat_id=chat_id, text=f"⏳ Téléchargement du Top {i+1}...")
                 input_video = await asyncio.to_thread(download_video, vid_url, output_dir)
                 
+                if not input_video:
+                    await context.bot.send_message(chat_id=chat_id, text=f"❌ Échec du téléchargement yt-dlp pour le Top {i+1} ({vid_url}).")
+                    continue
+                
                 output_video = os.path.join(output_dir, f"processed_top{i+1}_{trend['id']}.mp4")
                 await context.bot.send_message(chat_id=chat_id, text=f"🎨 Traitement FFmpeg du Top {i+1}...")
                 success = await asyncio.to_thread(process_video, input_video, output_video)
