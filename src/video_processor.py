@@ -16,8 +16,9 @@ def download_video(url: str, output_dir: str) -> str:
     cookie_path = os.path.join(project_root, 'cookies.txt')
     
     ydl_opts = {
-        # On force le codec H264 (avc1) car le format AV1 (401) par défaut fige le décodage FFmpeg sur une petite VM
-        'format': 'bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        # On force H264 (avc1) et on limite la taille à 1080p vertical (hauteur <= 1920) 
+        # pour éviter que YouTube nous envoie du 4K AV1 impossible à décoder sur un petit CPU.
+        'format': 'bestvideo[height<=1920][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[height<=1920][ext=mp4]+bestaudio[ext=m4a]/best[height<=1920]/best',
         'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
         'quiet': False,
         'verbose': True,
@@ -67,10 +68,13 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
         video = stream.video
         audio = stream.audio
         
+        # 0. Redimensionnement d'urgence à 1080p vertical (TikTok max) pour sauver le CPU
+        video = ffmpeg.filter(video, 'scale', w='min(1080,iw)', h='min(1920,ih)', force_original_aspect_ratio='decrease')
+        
         # 1. Rotation subtile
         video = ffmpeg.filter(video, 'rotate', a=angle_rad)
         
-        # 2. Crop pour enlever les filigranes (souvent sur les bords) et les bords noirs de la rotation
+        # 2. Crop pour enlever les filigranes
         video = ffmpeg.filter(video, 'crop', w='floor(iw*0.84/2)*2', h='floor(ih*0.84/2)*2', x='floor(iw*0.08/2)*2', y='floor(ih*0.08/2)*2')
         
         # 3. Bruit léger (Optimisé pour petit CPU)
