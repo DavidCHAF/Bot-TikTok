@@ -17,12 +17,17 @@ def download_video(url: str, output_dir: str) -> str:
         'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
         'quiet': False,
         'verbose': True,
-        'cookiefile': cookie_path
+        'cookiefile': cookie_path,
+        'socket_timeout': 15,
+        'retries': 3
     }
     
     try:
+        print(f"🔧 [DEBUG] Lancement yt-dlp pour {url}...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            print("🔧 [DEBUG] YoutubeDL instance créée. Extraction info...")
             info_dict = ydl.extract_info(url, download=True)
+            print("🔧 [DEBUG] Extraction terminée.")
             video_id = info_dict.get('id', 'video')
             ext = info_dict.get('ext', 'mp4')
             return os.path.join(output_dir, f"{video_id}.{ext}")
