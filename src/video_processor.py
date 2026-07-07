@@ -129,7 +129,7 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
                     current_time_sec = int(h) * 3600 + int(m) * 60 + float(s)
                     percent = min(100, int((current_time_sec / duration) * 100))
                     
-                    if time.time() - last_update_time >= 5.0:
+                    if time.time() - last_update_time >= 2.0:
                         try:
                             await progress_callback(percent)
                         except Exception as e:
