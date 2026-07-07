@@ -68,7 +68,7 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
         video = stream.video
         audio = stream.audio
         
-        # 0. Redimensionnement d'urgence à 1080p vertical (TikTok max) pour sauver le CPU
+        # 0. Redimensionnement à 1080p vertical (TikTok max) 
         video = ffmpeg.filter(video, 'scale', w='min(1080,iw)', h='min(1920,ih)', force_original_aspect_ratio='decrease')
         
         # 1. Rotation subtile
@@ -87,8 +87,10 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
             output_path, 
             map_metadata='-1', 
             vcodec='libx264', 
-            crf=23, 
+            crf=26, 
             preset='ultrafast',
+            maxrate='4.5M',
+            bufsize='9M',
             threads=1,
             acodec='aac'
         ).overwrite_output().global_args('-nostdin')
