@@ -37,13 +37,10 @@ def download_video(url: str, output_dir: str) -> str:
 
 def process_video(input_path: str, output_path: str) -> bool:
     """
-    Applique des filtres discrets via FFmpeg pour contourner la détection :
-    - Rotation très légère
-    - Crop (recadrage) pour masquer les bords et les filigranes
-    - Ajout de bruit/lignes très léger
-    - Suppression des métadonnées
+    Applique des filtres discrets via FFmpeg pour contourner la détection.
     """
     try:
+        print(f"🔧 [DEBUG] Démarrage FFmpeg : {input_path} -> {output_path}")
         # Rotation aléatoire entre -1.5 et 1.5 degrés
         rotation_deg = random.uniform(-1.5, 1.5)
         angle_rad = rotation_deg * (3.14159 / 180.0)
@@ -70,15 +67,19 @@ def process_video(input_path: str, output_path: str) -> bool:
             map_metadata='-1', 
             vcodec='libx264', 
             crf=23, 
-            preset='ultrafast', # Soulage la RAM et le CPU
-            threads=1, # Évite que FFmpeg n'explose la RAM sur un petit serveur
+            preset='fast',
             acodec='aac'
         )
         
-        out.overwrite_output().run(capture_stdout=True, capture_stderr=True)
+        print(f"🔧 [DEBUG] Lancement de la commande FFmpeg. Patientez...")
+        out.overwrite_output().global_args('-nostdin').run(capture_stdout=True, capture_stderr=True)
+        print(f"🔧 [DEBUG] FFmpeg a terminé avec succès.")
         return True
     except ffmpeg.Error as e:
         print("Erreur FFmpeg :")
         if e.stderr:
             print(e.stderr.decode('utf-8', errors='ignore'))
+        return False
+    except Exception as e:
+        print(f"🔧 [DEBUG] Exception inattendue dans process_video : {e}")
         return False

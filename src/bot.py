@@ -207,13 +207,16 @@ async def execute_t2_logic(context: ContextTypes.DEFAULT_TYPE, chat_id: int, nic
                 success = await asyncio.to_thread(process_video, input_video, output_video)
                 
                 if success and os.path.exists(output_video):
+                    print(f"🔧 [DEBUG] Envoi de la vidéo traitée vers Telegram...")
                     with open(output_video, 'rb') as video_file:
                         await context.bot.send_video(
                             chat_id=chat_id, 
                             video=video_file, 
                             caption=f"🎬 Voici ton Top {i+1} ({trend['c_r']:.1f}% croissance)"
                         )
+                    print(f"🔧 [DEBUG] Vidéo envoyée avec succès.")
                 else:
+                    print(f"🔧 [DEBUG] Echec success={success} ou fichier non existant.")
                     await context.bot.send_message(chat_id=chat_id, text=f"❌ Echec du traitement FFmpeg pour le Top {i+1}.")
                     
             except Exception as e:
