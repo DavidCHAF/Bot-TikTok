@@ -69,7 +69,7 @@ def paraphrase_text(transcript: str) -> str:
         return ""
         
     print(f"🧠 [Gemini] Paraphrase sémantique en cours...")
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('gemini-1.5-flash')
     prompt = f"""Tu es un expert en création de contenu viral sur TikTok.
 Voici le script exact d'une vidéo virale. Réécris ce script pour dire la même chose avec la même intensité et le même aspect captivant, mais en changeant complètement le vocabulaire et la structure des phrases pour que ce soit un script 100% original.
 Ne rajoute aucune introduction ou conclusion, juste le script pur à lire à haute voix.
