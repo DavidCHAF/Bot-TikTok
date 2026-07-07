@@ -62,27 +62,18 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
         
         # Rotation aléatoire très légère (-1 à 1 degré max)
         rotation_deg = random.uniform(-1.0, 1.0)
-        angle_rad = rotation_deg * (3.14159 / 180.0)
-        
         stream = ffmpeg.input(input_path)
         video = stream.video
         audio = stream.audio
         
-        # 0. Redimensionnement "Crop to Fill" pour forcer le 9:16 sans AUCUN écrasement ni bande noire
+        # 0. Redimensionnement "Crop to Fill" pour forcer le 9:16 parfait sans écrasement
         video = ffmpeg.filter(video, 'scale', w=1080, h=1920, force_original_aspect_ratio='increase')
         video = ffmpeg.filter(video, 'crop', 1080, 1920)
         
-        # 1. Rotation très légère (ow/oh fixe la taille, le fond devient noir sur les bords)
-        video = ffmpeg.filter(video, 'rotate', a=angle_rad, ow='iw', oh='ih')
-        
-        # 2. Zoom de 3.5% pour cacher parfaitement les triangles noirs de la rotation de 1 degré
-        video = ffmpeg.filter(video, 'scale', 'iw*1.035', 'ih*1.035')
-        video = ffmpeg.filter(video, 'crop', 1080, 1920)
-        
-        # 3. Ajustement colorimétrique imperceptible
+        # 1. Ajustement colorimétrique imperceptible
         video = ffmpeg.filter(video, 'eq', brightness=0.01, contrast=1.01, saturation=1.02)
         
-        # 2. Accélération de 1% (Modifie la durée, la bande son et le hash global de la vidéo)
+        # 2. Accélération de 1% (Bypass redoutable)
         video = ffmpeg.filter(video, 'setpts', '0.99*PTS')
         audio = ffmpeg.filter(audio, 'atempo', '1.01')
         
