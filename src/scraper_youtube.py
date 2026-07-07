@@ -1,5 +1,6 @@
 import os
 import re
+import datetime
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from langdetect import detect
@@ -47,7 +48,9 @@ def is_western_content(text: str) -> bool:
         "wait for end", "wait for it", "respect", "sigma rule", 
         "boys attitude", "girls attitude", "komedi", "mr indian",
         "crazy xyz", "pubg", "bgmi", "free fire", "whatsapp status",
-        "fact", "facts", "knowledge", "story", "kahani", "hindi", "india", "bhai"
+        "fact", "facts", "knowledge", "story", "kahani", "hindi", "india", "bhai",
+        "desi", "bhojpuri", "tamil", "telugu", "kannada", "malayalam",
+        "marathi", "gujarati", "punjabi", "pakistan", "urdu", "indian"
     ]
     text_lower = text.lower()
     for kw in blacklist_keywords:
@@ -98,6 +101,11 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
         f"{niche} video"
     ]
     
+    # Limite à 2 jours dans le passé
+    time_limit = datetime.datetime.utcnow() - datetime.timedelta(days=2)
+    published_after = time_limit.isoformat("T") + "Z"
+
+    
     try:
         for query in queries:
             if len(videos) >= max_videos:
@@ -117,7 +125,8 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                         "videoDuration": "short", # Filtre officiel pour les vidéos < 4 min
                         "order": "date",          # Tri strict par date d'ajout
                         "maxResults": 50,
-                        "pageToken": next_page_token
+                        "pageToken": next_page_token,
+                        "publishedAfter": published_after
                     }
                 
                     if published_before:
@@ -175,9 +184,9 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                     if lang:
                         target_lang = lang.split("-")[0] if "-" in lang else lang
                         if target_lang == 'en':
-                            allowed_countries = ['US', 'CA', 'GB', 'AU', 'NZ', None]
+                            allowed_countries = ['US', 'CA', 'GB', 'AU', 'NZ']
                         elif target_lang == 'fr':
-                            allowed_countries = ['FR', 'CA', 'BE', 'CH', None]
+                            allowed_countries = ['FR', 'CA', 'BE', 'CH']
                 
                     for stat in stats_items:
                         stats = stat.get("statistics", {})
@@ -227,14 +236,17 @@ def scrape_youtube_shorts(niche: str, max_videos: int = 500, lang: str = None) -
                 
                     next_page_token = search_response.get("nextPageToken")
                 
-                    # Si l'API YouTube bloque (plus de pageToken) mais qu'on n'a pas fini : 
-                    # on remonte le temps à partir de la dernière vidéo !
                     if not next_page_token and len(videos) < max_videos:
                         last_published = None
                         if search_items:
                             last_published = search_items[-1]["snippet"]["publishedAt"]
                     
                         if last_published:
+                            # Vérifie que last_published n'est pas déjà plus vieux que published_after
+                            if last_published < published_after:
+                                print(f"⚠️ Mur de l'API (limite de 2 jours) atteint pour '{query}'. Passage au mot-clé suivant...")
+                                break
+                            
                             published_before = last_published
                             next_page_token = None
                             print(f"🔄 Limite atteinte pour '{query}'. Reprise dans le passé depuis : {published_before}")

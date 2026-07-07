@@ -35,7 +35,7 @@ async def yt_t1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Run real T1 sourcing for YouTube Shorts."""
     args = context.args
     niche = args[0] if len(args) > 0 else "général"
-    lang = args[1] if len(args) > 1 else None
+    lang = args[1] if len(args) > 1 else "en-US"
     chat_id = update.effective_chat.id
     
     lang_text = f" (Langue: {lang})" if lang else " (Monde entier)"

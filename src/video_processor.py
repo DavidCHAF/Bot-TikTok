@@ -51,8 +51,8 @@ def process_video(input_path: str, output_path: str) -> bool:
         video = ffmpeg.filter(video, 'rotate', a=angle_rad)
         
         # 2. Crop pour enlever les filigranes (souvent sur les bords) et les bords noirs de la rotation
-        # On coupe 8% de chaque côté
-        video = ffmpeg.filter(video, 'crop', w='iw*0.84', h='ih*0.84', x='iw*0.08', y='ih*0.08')
+        # On coupe 8% de chaque côté. On force les dimensions paires avec floor(X/2)*2 pour libx264
+        video = ffmpeg.filter(video, 'crop', w='floor(iw*0.84/2)*2', h='floor(ih*0.84/2)*2', x='floor(iw*0.08/2)*2', y='floor(ih*0.08/2)*2')
         
         # 3. Bruit léger / variations luma (quasi-imperceptible)
         video = ffmpeg.filter(video, 'noise', alls=1, allf='t+u')
