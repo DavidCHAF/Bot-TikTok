@@ -322,85 +322,17 @@ async def process_video(input_path: str, output_path: str, progress_callback=Non
         return False
 import src.ai_remaster as ai_remaster
 
-async def remaster_video_full_pipeline(input_path: str, output_path: str, progress_callback=None) -> bool:
+def generate_ass(vtt_path: str, ass_path: str, video_width: int, video_height: int, margin_v: int, style_type: str = "hormozi"):
     try:
-        print(f"[Remaster] Demarrage du pipeline IA pour {input_path}...")
-        work_dir = os.path.dirname(input_path)
-        basename = os.path.splitext(os.path.basename(input_path))[0]
-        
-        # 1. Separation Audio (Demucs)
-        if progress_callback: await progress_callback(10)
-        vocals_wav, no_vocals_wav = await ai_remaster.separate_audio(input_path, work_dir)
-        
-        # 2. Transcription
-        if progress_callback: await progress_callback(40)
-        transcript = ai_remaster.transcribe_audio(vocals_wav)
-        
-        if not transcript or len(transcript.strip()) < 2:
-            print("[Remaster] Aucun texte transcrit. Application des filtres visuels de base uniquement.")
-            return await process_video(input_path, output_path, progress_callback)
-        
-        # 3. Paraphrase Gemini
-        if progress_callback: await progress_callback(60)
-        new_script = ai_remaster.paraphrase_text(transcript)
-        if not new_script:
-            print("[Remaster] Impossible de paraphraser. Fallback au script original.")
-            new_script = transcript
+        with open(vtt_path, 'r', encoding='utf-8') as f:
+            vtt_lines = f.readlines()
             
-        # 4. Generation TTS + Sous-titres
-        if progress_callback: await progress_callback(70)
-        tts_audio = os.path.join(work_dir, f"{basename}_tts.mp3")
-        tts_vtt = os.path.join(work_dir, f"{basename}_tts.vtt")
-        
-        success = await ai_remaster.generate_tts(new_script, tts_audio, tts_vtt)
-        if not success:
-            return False
-            
-        # Detection OCR dynamique
-        zones, video_width, video_height = await asyncio.to_thread(detect_text_zones, input_path)
-        
-        # 5. Montage FFmpeg (Incrustation VTT, Mixage Audio, Bande Noire)
-        if progress_callback: await progress_callback(85)
-        print("[Remaster] Assemblage FFmpeg final...")
-        
-        video = ffmpeg.input(input_path).video
-        
-        # Application des masques dynamiques
-        if zones:
-            print(f"[Remaster] {len(zones)} zones de texte detectees. Masquage...")
-            main_z = max(zones, key=lambda z: z['w']*z['h'])
-            
-            # On force le rectangle noir a faire 80% de la largeur de l'ecran et a etre centre
-            # Cela garantit que le nouveau texte aura toujours la place de s'afficher
-            pad_x = int(video_width * 0.1)
-            pad_w = int(video_width * 0.8)
-            pad_y = max(0, main_z['y'] - 30)
-            pad_h = main_z['h'] + 60
-            
-            video = ffmpeg.filter(video, 'drawbox', x=pad_x, y=pad_y, width=pad_w, height=pad_h, color='black@1.0', t='fill')
-            
-            # Marge basse (MarginV)
-            margin_v = video_height - (pad_y + pad_h) + 15
-            if margin_v < 10: margin_v = 10
-            # Marges gauche et droite
-            margin_l = pad_x + 10
-            margin_r = pad_x + 10
+        if style_type == "hormozi":
+            style_def = f"Style: Default,Impact,55,&H0000FFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,2,20,20,{int(margin_v)},1"
         else:
-            print("[Remaster] Aucun texte detecte. Utilisation de la zone de sous-titres par defaut.")
-            pad_x = int(video_width * 0.075) if video_width else 40
-            pad_w = int(video_width * 0.85) if video_width else 1000
-            video = ffmpeg.filter(video, 'drawbox', x='(iw-w)/2', y='ih*0.75', width='iw*0.85', height='ih*0.15', color='black@1.0', t='fill')
-            margin_v = int(video_height * 0.17) if video_height else 120
-            margin_l = pad_x
-            margin_r = pad_x
+            style_def = f"Style: Default,Arial,30,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,20,20,20,1"
             
-        # Conversion VTT vers ASS pour un controle absolu du rendu
-        ass_path = tts_vtt.replace(".vtt", ".ass")
-        try:
-            with open(tts_vtt, 'r', encoding='utf-8') as f:
-                vtt_lines = f.readlines()
-            
-            ass_content = f"""[Script Info]
+        ass_content = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {video_width}
 PlayResY: {video_height}
@@ -408,51 +340,137 @@ WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,50,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,0,2,{int(margin_l)},{int(margin_r)},{int(margin_v)},1
+{style_def}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-            def convert_time(vtt_time):
-                h, m, s = vtt_time.split(':')
-                s, ms = s.split('.')
-                return f"{int(h)}:{m}:{s}.{ms[:2]}"
-                
-            i = 0
-            while i < len(vtt_lines):
-                line = vtt_lines[i].strip()
-                if '-->' in line:
-                    start_vtt, end_vtt = line.split(' --> ')
-                    start_ass = convert_time(start_vtt.strip())
-                    end_ass = convert_time(end_vtt.strip())
-                    
-                    text_block = []
-                    i += 1
-                    while i < len(vtt_lines) and vtt_lines[i].strip() != '':
-                        text_block.append(vtt_lines[i].strip())
-                        i += 1
-                    text_ass = '\\N'.join(text_block)
-                    
-                    ass_content += f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{text_ass}\n"
-                else:
-                    i += 1
-                    
-            with open(ass_path, 'w', encoding='utf-8') as f:
-                f.write(ass_content)
-        except Exception as e:
-            print(f"[Remaster] Erreur de conversion VTT vers ASS: {e}")
-            ass_path = tts_vtt # Fallback
+        def convert_time(vtt_time):
+            h, m, s = vtt_time.split(':')
+            s, ms = s.split('.')
+            return f"{int(h)}:{m}:{s}.{ms[:2]}"
             
-        ass_abs = os.path.abspath(ass_path)
-        ass_safe = ass_abs.replace('\\', '/').replace(':', '\\:')
+        i = 0
+        while i < len(vtt_lines):
+            line = vtt_lines[i].strip()
+            if '-->' in line:
+                start_vtt, end_vtt = line.split(' --> ')
+                start_ass = convert_time(start_vtt.strip())
+                end_ass = convert_time(end_vtt.strip())
+                
+                text_block = []
+                i += 1
+                while i < len(vtt_lines) and vtt_lines[i].strip() != '':
+                    text_block.append(vtt_lines[i].strip())
+                    i += 1
+                text_raw = '\\N'.join(text_block)
+                
+                if style_type == "hormozi":
+                    text_ass = f"{{\\fscx80\\fscy80\\t(0,150,\\fscx100\\fscy100)}}{text_raw.upper()}"
+                else:
+                    text_ass = text_raw
+                    
+                ass_content += f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{text_ass}\\n"
+            else:
+                i += 1
+                
+        with open(ass_path, 'w', encoding='utf-8') as f:
+            f.write(ass_content)
+        return True
+    except Exception as e:
+        print(f"[Remaster] Erreur generate_ass: {e}")
+        return False
+
+async def remaster_video_full_pipeline(input_path: str, output_path: str, progress_callback=None) -> bool:
+    try:
+        print(f"[Remaster] Demarrage du pipeline IA Double Voix pour {input_path}...")
+        work_dir = os.path.dirname(input_path)
+        basename = os.path.splitext(os.path.basename(input_path))[0]
         
-        # On utilise le fichier ASS genere (plus besoin de force_style)
-        video = ffmpeg.filter(video, 'subtitles', filename=ass_safe)
+        # 1. Separation Audio via HF
+        if progress_callback: await progress_callback(10)
+        vocals_wav, no_vocals_wav = await ai_remaster.separate_audio_hf(input_path, work_dir)
+        if not vocals_wav:
+            return False
+            
+        # 2. Transcription (Whisper tiny)
+        if progress_callback: await progress_callback(30)
+        segments = ai_remaster.transcribe_audio_with_timestamps(vocals_wav)
+        main_script = " ".join([seg['text'] for seg in segments])
         
+        # 3. Description Gemini Vision
+        if progress_callback: await progress_callback(40)
+        desc_script = ai_remaster.describe_video_visually(input_path)
+        
+        # 4. Generation TTS Principale
+        if progress_callback: await progress_callback(50)
+        main_tts_audio = os.path.join(work_dir, f"{basename}_main_tts.mp3")
+        main_tts_vtt = os.path.join(work_dir, f"{basename}_main_tts.vtt")
+        if main_script:
+            await ai_remaster.generate_tts(main_script, main_tts_audio, main_tts_vtt, voice="fr-FR-HenriNeural")
+            
+        # 5. Generation TTS Descriptive
+        if progress_callback: await progress_callback(60)
+        desc_tts_audio = os.path.join(work_dir, f"{basename}_desc_tts.mp3")
+        desc_tts_vtt = os.path.join(work_dir, f"{basename}_desc_tts.vtt")
+        if desc_script:
+            await ai_remaster.generate_tts(desc_script, desc_tts_audio, desc_tts_vtt, voice="fr-FR-VivienneNeural")
+            
+        # Detection OCR dynamique
+        zones, video_width, video_height = await asyncio.to_thread(detect_text_zones, input_path)
+        
+        # 6. Assemblage FFmpeg Visuel
+        if progress_callback: await progress_callback(70)
+        print("[Remaster] Assemblage FFmpeg Visuel...")
+        
+        video = ffmpeg.input(input_path).video
+        
+        # Floutage delogo
+        margin_v = 150
+        if zones:
+            main_z = max(zones, key=lambda z: z['w']*z['h'])
+            box_x = max(0, main_z['x'] - 10)
+            box_y = max(0, main_z['y'] - 10)
+            box_w = min(video_width - box_x, main_z['w'] + 20)
+            box_h = min(video_height - box_y, main_z['h'] + 20)
+            video = ffmpeg.filter(video, 'delogo', x=box_x, y=box_y, w=box_w, h=box_h)
+            margin_v = video_height - box_y - box_h + 20
+            
+        # Miroir + Zoom
+        video = ffmpeg.filter(video, 'hflip')
+        video = ffmpeg.filter(video, 'zoompan', z='min(zoom+0.0005,1.1)', x='iw/2-(iw/zoom/2)', y='ih/2-(ih/zoom/2)', d=1, s=f'{video_width}x{video_height}', fps=30)
+        
+        # Sous-titres
+        if main_script and os.path.exists(main_tts_vtt):
+            main_ass_path = os.path.join(work_dir, f"{basename}_main.ass")
+            generate_ass(main_tts_vtt, main_ass_path, video_width, video_height, margin_v, "hormozi")
+            safe_ass = os.path.abspath(main_ass_path).replace('\\', '/').replace(':', '\\:')
+            video = ffmpeg.filter(video, 'subtitles', filename=safe_ass)
+            
+        if desc_script and os.path.exists(desc_tts_vtt):
+            desc_ass_path = os.path.join(work_dir, f"{basename}_desc.ass")
+            generate_ass(desc_tts_vtt, desc_ass_path, video_width, video_height, 20, "classic")
+            safe_ass = os.path.abspath(desc_ass_path).replace('\\', '/').replace(':', '\\:')
+            video = ffmpeg.filter(video, 'subtitles', filename=safe_ass)
+            
         # Mixage Audio
-        audio_no_vocals = ffmpeg.input(no_vocals_wav).audio
-        audio_tts = ffmpeg.input(tts_audio).audio
-        audio_mix = ffmpeg.filter([audio_no_vocals, audio_tts], 'amix', inputs=2, duration='longest')
+        if progress_callback: await progress_callback(85)
+        audio_inputs = []
+        if os.path.exists(no_vocals_wav):
+            audio_inputs.append(ffmpeg.input(no_vocals_wav).audio)
+        if main_script and os.path.exists(main_tts_audio):
+            audio_inputs.append(ffmpeg.input(main_tts_audio).audio)
+        if desc_script and os.path.exists(desc_tts_audio):
+            audio_inputs.append(ffmpeg.input(desc_tts_audio).audio)
+            
+        if len(audio_inputs) == 3:
+            audio_mix = ffmpeg.filter(audio_inputs, 'amix', inputs=3, weights="1 1 0.3", duration='longest')
+        elif len(audio_inputs) == 2:
+            audio_mix = ffmpeg.filter(audio_inputs, 'amix', inputs=2, duration='longest')
+        elif len(audio_inputs) == 1:
+            audio_mix = audio_inputs[0]
+        else:
+            audio_mix = ffmpeg.input(input_path).audio
         
         out = ffmpeg.output(
             video, 
