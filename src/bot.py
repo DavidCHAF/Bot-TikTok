@@ -13,6 +13,18 @@ from src.video_processor import download_video, process_video, remaster_video_fu
 # Token via environment variable
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 
+CURRENT_VIDEO_TASKS = {}
+
+async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Skip the currently processing video."""
+    chat_id = update.effective_chat.id
+    task = CURRENT_VIDEO_TASKS.get(chat_id)
+    if task and not task.done():
+        task.cancel()
+        await update.message.reply_text("⏭️ Signal d'annulation envoyé pour la vidéo en cours...")
+    else:
+        await update.message.reply_text("❌ Aucune vidéo en cours de traitement à passer.")
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /help is issued."""
     await update.message.reply_text(
@@ -194,69 +206,80 @@ async def execute_t2_logic(context: ContextTypes.DEFAULT_TYPE, chat_id: int, nic
         # 4. Traitement Vidéo
         output_dir = "downloads"
         for i, trend in enumerate(trends_to_process):
-            vid_url = trend['url']
-            try:
-                await context.bot.send_message(chat_id=chat_id, text=f"⏳ Téléchargement du Top {i+1}...")
-                input_video = await asyncio.to_thread(download_video, vid_url, output_dir)
-                
-                if not input_video:
-                    await context.bot.send_message(chat_id=chat_id, text=f"❌ Échec du téléchargement yt-dlp pour le Top {i+1} ({vid_url}).")
-                    continue
-                
-                output_video = os.path.join(output_dir, f"processed_top{i+1}_{trend['id']}.mp4")
-                
-                progress_msg = await context.bot.send_message(chat_id=chat_id, text=f"🎨 Traitement FFmpeg du Top {i+1}... [░░░░░░░░░░] 0%")
-                last_sent_text = [f"🎨 Traitement FFmpeg du Top {i+1}... [░░░░░░░░░░] 0%"]
-                
-                async def update_progress(percent: int):
-                    bar_length = 10
-                    filled = int(percent / 10)
-                    bar = '█' * filled + '░' * (bar_length - filled)
-                    text = f"🎨 Traitement FFmpeg du Top {i+1}... [{bar}] {percent}%"
-                    if last_sent_text[0] != text:
+            async def process_one_video(idx, t_data):
+                vid_url = t_data['url']
+                try:
+                    output_video = os.path.join(output_dir, f"processed_{t_data['id']}.mp4")
+                    
+                    if os.path.exists(output_video):
+                        await context.bot.send_message(chat_id=chat_id, text=f"✅ Vidéo Top {idx+1} déjà traitée, envoi direct...")
+                        success = True
+                    else:
+                        await context.bot.send_message(chat_id=chat_id, text=f"⏳ Téléchargement du Top {idx+1}...")
+                        input_video = await asyncio.to_thread(download_video, vid_url, output_dir)
+                        
+                        if not input_video:
+                            await context.bot.send_message(chat_id=chat_id, text=f"❌ Échec du téléchargement yt-dlp pour le Top {idx+1} ({vid_url}).")
+                            return
+                        
+                        progress_msg = await context.bot.send_message(chat_id=chat_id, text=f"🎨 Traitement FFmpeg du Top {idx+1}... [░░░░░░░░░░] 0%")
+                        last_sent_text = [f"🎨 Traitement FFmpeg du Top {idx+1}... [░░░░░░░░░░] 0%"]
+                        
+                        async def update_progress(percent: int):
+                            bar_length = 10
+                            filled = int(percent / 10)
+                            bar = '█' * filled + '░' * (bar_length - filled)
+                            text = f"🎨 Traitement FFmpeg du Top {idx+1}... [{bar}] {percent}%"
+                            if last_sent_text[0] != text:
+                                try:
+                                    await progress_msg.edit_text(text)
+                                    last_sent_text[0] = text
+                                except Exception:
+                                    pass
+                        
+                        success = await remaster_video_full_pipeline(input_video, output_video, update_progress)
+                        
+                    if success and os.path.exists(output_video):
+                        print(f"🔧 [DEBUG] Envoi de la vidéo traitée vers Telegram...")
+                        
                         try:
-                            await progress_msg.edit_text(text)
-                            last_sent_text[0] = text
-                        except Exception:
+                            probe = await asyncio.to_thread(ffmpeg.probe, output_video)
+                            video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+                            if video_stream:
+                                res_w = video_stream['width']
+                                res_h = video_stream['height']
+                                await context.bot.send_message(chat_id=chat_id, text=f"✅ Résolution finale générée : {res_w}x{res_h} (9:16)")
+                        except Exception as e:
                             pass
-                
-                success = await remaster_video_full_pipeline(input_video, output_video, update_progress)
-                
-                if success and os.path.exists(output_video):
-                    print(f"🔧 [DEBUG] Envoi de la vidéo traitée vers Telegram...")
-                    
-                    try:
-                        probe = await asyncio.to_thread(ffmpeg.probe, output_video)
-                        video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
-                        if video_stream:
-                            res_w = video_stream['width']
-                            res_h = video_stream['height']
-                            await context.bot.send_message(chat_id=chat_id, text=f"✅ Résolution finale générée : {res_w}x{res_h} (9:16)")
-                    except Exception as e:
-                        pass
+                            
+                        with open(output_video, 'rb') as video_file:
+                            desc = t_data.get('description', '')
+                            if len(desc) > 700:
+                                desc = desc[:700] + "..."
+                            
+                            final_caption = f"🎬 Voici ton Top {idx+1} ({t_data['c_r']:.1f}% croissance)\n\n📝 Description originale:\n{desc}"
+                            
+                            await context.bot.send_video(
+                                chat_id=chat_id, 
+                                video=video_file, 
+                                caption=final_caption,
+                                read_timeout=120,
+                                write_timeout=120,
+                                connect_timeout=120
+                            )
+                        print(f"🔧 [DEBUG] Vidéo envoyée avec succès.")
+                    else:
+                        print(f"🔧 [DEBUG] Echec success={success} ou fichier non existant.")
+                        await context.bot.send_message(chat_id=chat_id, text=f"❌ Echec du traitement FFmpeg pour le Top {idx+1}.")
                         
-                    with open(output_video, 'rb') as video_file:
-                        desc = trend.get('description', '')
-                        if len(desc) > 700:
-                            desc = desc[:700] + "..."
-                        
-                        final_caption = f"🎬 Voici ton Top {i+1} ({trend['c_r']:.1f}% croissance)\n\n📝 Description originale:\n{desc}"
-                        
-                        await context.bot.send_video(
-                            chat_id=chat_id, 
-                            video=video_file, 
-                            caption=final_caption,
-                            read_timeout=120,
-                            write_timeout=120,
-                            connect_timeout=120
-                        )
-                    print(f"🔧 [DEBUG] Vidéo envoyée avec succès.")
-                else:
-                    print(f"🔧 [DEBUG] Echec success={success} ou fichier non existant.")
-                    await context.bot.send_message(chat_id=chat_id, text=f"❌ Echec du traitement FFmpeg pour le Top {i+1}.")
-                    
-            except Exception as e:
-                await context.bot.send_message(chat_id=chat_id, text=f"❌ Erreur vidéo Top {i+1}: {e}")
+                except asyncio.CancelledError:
+                    await context.bot.send_message(chat_id=chat_id, text=f"⏭️ Commande Skip reçue : Vidéo Top {idx+1} ignorée.")
+                except Exception as e:
+                    await context.bot.send_message(chat_id=chat_id, text=f"❌ Erreur vidéo Top {idx+1}: {e}")
+
+            task = asyncio.create_task(process_one_video(i, trend))
+            CURRENT_VIDEO_TASKS[chat_id] = task
+            await task
 
     except Exception as e:
         await context.bot.send_message(chat_id=chat_id, text=f"❌ Erreur critique lors de T2 : {e}")
@@ -320,7 +343,7 @@ def main() -> None:
     if TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
         print("⚠️ Attention: Token Telegram non configuré (utilisez TELEGRAM_BOT_TOKEN).")
         
-    application = Application.builder().token(TOKEN).build()
+    application = Application.builder().token(TOKEN).concurrent_updates(True).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
@@ -328,6 +351,7 @@ def main() -> None:
     application.add_handler(CommandHandler("yt_t2", yt_t2))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("clear", clear_command))
+    application.add_handler(CommandHandler("skip", skip_command))
     application.add_handler(CallbackQueryHandler(button_callback))
 
     print("🤖 Bot démarré. En attente de messages...")

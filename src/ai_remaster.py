@@ -16,12 +16,12 @@ else:
     except Exception as e:
         print(f"❌ [Gemini] Erreur d'initialisation du client : {e}")
 
-async def separate_audio_hf(input_video_path: str, output_dir: str):
+async def separate_audio_local(input_video_path: str, output_dir: str):
     """
-    Sépare la voix de la musique via un serveur distant Hugging Face (Gradio).
+    Sépare la voix de la musique via Demucs en local (faible conso RAM).
     """
     import ffmpeg
-    from gradio_client import Client, handle_file
+    import shutil
     
     basename = os.path.splitext(os.path.basename(input_video_path))[0]
     audio_wav = os.path.join(output_dir, f"{basename}_full.wav")
@@ -33,30 +33,52 @@ async def separate_audio_hf(input_video_path: str, output_dir: str):
         print(f"❌ [FFmpeg] Erreur extraction audio: {e.stderr.decode()}")
         return None, None
 
-    print(f"🎵 [HuggingFace] Envoi de l'audio à Demucs (distant)...")
+    print(f"🎵 [Demucs] Séparation de l'audio en local (modèle mdx_extra_q)...")
+    demucs_out_dir = os.path.join(output_dir, "demucs_out")
+    os.makedirs(demucs_out_dir, exist_ok=True)
+    
     try:
-        # Utilisation d'un espace public par defaut (peut etre instable)
-        client_hf = Client("fabiogra/demucs")
-        result = client_hf.predict(
-            audio=handle_file(audio_wav),
-            model="htdemucs",
-            api_name="/predict"
+        # Exécution de demucs en local avec un modèle léger
+        cmd = [
+            "demucs",
+            "-n", "mdx_extra_q",
+            "-d", "cpu", # Force CPU pour utiliser moins de RAM/VRAM
+            "--two-stems", "vocals",
+            "-o", demucs_out_dir,
+            audio_wav
+        ]
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
+        stdout, stderr = await process.communicate()
         
-        # Le resultat d'un tel Space est souvent un dossier temp contenant les stems
-        # Pour faire simple en cas de format inconnu, on simule ici la reponse si l'API est complexe.
-        # Dans un vrai cas de production, l'utilisateur devra brancher son propre API Endpoint.
-        # Par securite, si l'API externe echoue ou retourne un format inattendu, on fallback.
-        print(f"✅ [HuggingFace] Succes de la separation !")
-        # Note: on devrait parser `result` ici pour trouver vocals.wav et no_vocals.wav
-        # Si fabiogra/demucs retourne un zip ou un dict de chemins, extraire ici.
-        # Pour l'instant, on leve une exception simulee pour forcer un fallback si non-configure :
-        raise Exception("Veuillez adapter le parsing de l'API HF a votre propre Space Demucs.")
+        if process.returncode != 0:
+            print(f"❌ [Demucs] Erreur locale: {stderr.decode()}")
+            raise Exception("Erreur d'exécution de Demucs local")
+            
+        print(f"✅ [Demucs] Succès de la séparation !")
         
+        model_out_dir = os.path.join(demucs_out_dir, "mdx_extra_q", f"{basename}_full")
+        vocals_generated = os.path.join(model_out_dir, "vocals.wav")
+        no_vocals_generated = os.path.join(model_out_dir, "no_vocals.wav")
+        
+        final_vocals = os.path.join(output_dir, f"{basename}_vocals.wav")
+        final_no_vocals = os.path.join(output_dir, f"{basename}_no_vocals.wav")
+        
+        if os.path.exists(vocals_generated) and os.path.exists(no_vocals_generated):
+            shutil.move(vocals_generated, final_vocals)
+            shutil.move(no_vocals_generated, final_no_vocals)
+            shutil.rmtree(demucs_out_dir, ignore_errors=True)
+            return final_vocals, final_no_vocals
+        else:
+            raise Exception("Fichiers de sortie introuvables.")
+            
     except Exception as e:
-        print(f"⚠️ [HuggingFace] Echec de l'API distante ({e}).")
-        print("⚠️ [Fallback] Utilisation de l'audio original comme bande-son (la voix originale ne sera pas effacee).")
-        # En mode fallback, 'no_vocals' est juste l'audio complet, et vocals est aussi l'audio complet
+        print(f"⚠️ [Demucs] Echec de l'exécution locale ({e}).")
+        print("⚠️ [Fallback] Utilisation de l'audio original comme bande-son.")
         return audio_wav, audio_wav
 
 def transcribe_audio_with_timestamps(audio_path: str):
@@ -111,13 +133,13 @@ def describe_video_visually(video_path: str) -> str:
     
     try:
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-3.5-flash',
             contents=[prompt] + images
         )
         return response.text.strip()
     except Exception as e:
         print(f"❌ [Gemini Vision] Erreur API: {e}")
-        return "On observe des actions intéressantes à l'écran."
+        return ""
 
 async def generate_tts(text: str, output_audio_path: str, output_vtt_path: str, voice: str = "fr-FR-HenriNeural"):
     """
@@ -135,7 +157,7 @@ async def generate_tts(text: str, output_audio_path: str, output_vtt_path: str, 
     cmd = [
         "edge-tts",
         "--voice", voice,
-        "--text", text,
+        "--text", clean_text,
         "--write-media", output_audio_path,
         "--write-subtitles", output_vtt_path
     ]
@@ -151,4 +173,61 @@ async def generate_tts(text: str, output_audio_path: str, output_vtt_path: str, 
         print(f"❌ [Edge-TTS] Erreur: {stderr.decode()}")
         return False
         
+    return True
+
+async def generate_synced_tts(segments, output_audio_path: str, voice: str = "en-US-ChristopherNeural"):
+    """
+    Génère un audio TTS où chaque phrase est générée individuellement et recalée
+    exactement sur son timestamp d'origine. Si le TTS est trop long, il est accéléré.
+    """
+    from pydub import AudioSegment
+    import tempfile
+    import ffmpeg
+    import re
+    
+    print(f"🗣️ [Edge-TTS] Génération synchronisée segment par segment...")
+    
+    if not segments: return False
+    
+    # Piste vide de la durée totale de la vidéo
+    total_duration_ms = int(segments[-1]['end'] * 1000) + 2000
+    final_audio = AudioSegment.silent(duration=total_duration_ms)
+    
+    for i, seg in enumerate(segments):
+        clean_text = re.sub(r'[^\w\s.,!?\']', '', seg['text']).strip()
+        if len(clean_text) < 2: continue
+        
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_audio:
+            tmp_path = tmp_audio.name
+            
+        cmd = ["edge-tts", "--voice", voice, "--text", clean_text, "--write-media", tmp_path]
+        process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await process.communicate()
+        
+        if process.returncode == 0 and os.path.exists(tmp_path):
+            chunk = AudioSegment.from_file(tmp_path)
+            orig_duration_ms = int((seg['end'] - seg['start']) * 1000)
+            tts_duration_ms = len(chunk)
+            
+            # Si le TTS déborde du temps original (plus de 100ms de marge)
+            if tts_duration_ms > orig_duration_ms + 100:
+                speed_factor = tts_duration_ms / orig_duration_ms
+                speed_factor = min(2.0, max(0.5, speed_factor)) # Limite ffmpeg
+                
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_fast:
+                    fast_path = tmp_fast.name
+                    
+                try:
+                    ffmpeg.input(tmp_path).filter('atempo', speed_factor).output(fast_path).overwrite_output().run(quiet=True)
+                    chunk = AudioSegment.from_file(fast_path)
+                except Exception as e:
+                    print(f"⚠️ [FFmpeg] Erreur atempo: {e}")
+                finally:
+                    if os.path.exists(fast_path): os.remove(fast_path)
+                    
+            final_audio = final_audio.overlay(chunk, position=int(seg['start'] * 1000))
+            
+        if os.path.exists(tmp_path): os.remove(tmp_path)
+        
+    final_audio.export(output_audio_path, format="mp3")
     return True
