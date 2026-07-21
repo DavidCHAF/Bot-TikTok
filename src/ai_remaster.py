@@ -175,8 +175,110 @@ async def generate_tts(text: str, output_audio_path: str, output_vtt_path: str, 
         return False
         
     return True
+def analyze_video_genders(audio_path: str, segments: list) -> dict:
+    """
+    Analyse dynamique de genre (100% hors-ligne) via Clustering 27D:
+    Utilise 13 MFCCs + 13 Delta MFCCs + Pitch pour séparer
+    les voix lourdement modifiées sans aucune API avec une précision redoutable.
+    """
+    genders = {}
+    if not segments: return genders
+    
+    try:
+        import librosa
+        import numpy as np
+        from sklearn.cluster import KMeans
+        from sklearn.preprocessing import StandardScaler
+        
+        # Extraire les features (27 dimensions) pour chaque segment
+        features = []
+        valid_indices = []
+        
+        print(f"🎵 [Gender] Analyse acoustique experte (27D MFCC+Pitch) de {len(segments)} segments...")
+        
+        for i, seg in enumerate(segments):
+            start_s = seg['start']
+            end_s = seg['end']
+            
+            # Échantillonnage à 16000Hz pour des MFCC stables
+            y, sr = librosa.load(audio_path, sr=16000, offset=start_s, duration=(end_s - start_s))
+            if len(y) == 0:
+                features.append(np.zeros(27))
+                continue
+                
+            # 1. Pitch (F0)
+            f0, voiced_flag, _ = librosa.pyin(y, fmin=50, fmax=400, sr=sr)
+            valid_f0 = f0[voiced_flag]
+            pitch = np.median(valid_f0) if len(valid_f0) > 0 else 0
+            
+            # 2. MFCC et Delta MFCC
+            mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+            mfcc_delta = librosa.feature.delta(mfcc)
+            
+            mfcc_mean = np.mean(mfcc, axis=1)
+            mfcc_delta_mean = np.mean(mfcc_delta, axis=1)
+            
+            # 3. Concaténation (27D)
+            vec = np.concatenate([mfcc_mean, mfcc_delta_mean, [pitch]])
+            features.append(vec)
+            
+            if pitch > 0:
+                valid_indices.append(i)
+                
+        # --- Etape de Clustering ---
+        if not valid_indices:
+            return {i: "male" for i in range(len(segments))}
+            
+        X_valid = [features[i] for i in valid_indices]
+        
+        pitches = [x[-1] for x in X_valid]
+        if len(X_valid) < 2 or np.std(pitches) < 15:
+            # S'il n'y a qu'une voix ou pas de variance
+            mean_pitch = np.mean(pitches)
+            default_gender = "female" if mean_pitch > 200 else "male"
+            print(f"🎵 [Gender] Mono-locuteur détecté -> {default_gender.upper()}")
+            for i in range(len(segments)):
+                genders[i] = default_gender if features[i][-1] > 0 else "male"
+            return genders
+            
+        # Clustering K-Means
+        X_array = np.array(X_valid)
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_array)
+        
+        kmeans = KMeans(n_clusters=2, random_state=42, n_init=20).fit(X_scaled)
+        
+        # Identifier le cluster Femme vs Homme
+        # On regarde le Pitch (dernier élément du vecteur 27D)
+        centers_orig = scaler.inverse_transform(kmeans.cluster_centers_)
+        pitch_cluster_0 = centers_orig[0][-1]
+        pitch_cluster_1 = centers_orig[1][-1]
+        
+        # La voix la plus aiguë est la femme
+        female_cluster_idx = 0 if pitch_cluster_0 > pitch_cluster_1 else 1
+        
+        print(f"🎵 [Gender] Cluster 0 - Pitch Moyen: {pitch_cluster_0:.1f}Hz")
+        print(f"🎵 [Gender] Cluster 1 - Pitch Moyen: {pitch_cluster_1:.1f}Hz")
+        print(f"🎵 [Gender] Cluster {female_cluster_idx} assigné à FEMME.")
+        
+        # Assigner les genres
+        for i, vec in enumerate(features):
+            if vec[-1] == 0:
+                genders[i] = "male"
+            else:
+                scaled_feat = scaler.transform([vec])
+                cluster = kmeans.predict(scaled_feat)[0]
+                g = "female" if cluster == female_cluster_idx else "male"
+                genders[i] = g
+                print(f"🎵 [Gender] Segment {i} -> {g.upper()}")
+                
+        return genders
+        
+    except Exception as e:
+        print(f"⚠️ [Gender] Erreur Clustering 27D: {e}")
+        return {i: "male" for i in range(len(segments))}
 
-async def generate_synced_tts(segments, output_audio_path: str, voice: str = "en-US-ChristopherNeural"):
+async def generate_synced_tts(segments, output_audio_path: str, voice: str = "en-US-ChristopherNeural", source_audio_path: str = None):
     """
     Génère un audio TTS où chaque phrase est générée individuellement et recalée
     exactement sur son timestamp d'origine. Si le TTS est trop long, il est accéléré.
@@ -190,6 +292,11 @@ async def generate_synced_tts(segments, output_audio_path: str, voice: str = "en
     
     if not segments: return False
     
+    # 1. Analyse dynamique des genres pour toute la vidéo d'un coup
+    segment_genders = {}
+    if source_audio_path:
+        segment_genders = analyze_video_genders(source_audio_path, segments)
+    
     # Piste vide de la durée totale de la vidéo
     total_duration_ms = int(segments[-1]['end'] * 1000) + 2000
     final_audio = AudioSegment.silent(duration=total_duration_ms)
@@ -201,7 +308,16 @@ async def generate_synced_tts(segments, output_audio_path: str, voice: str = "en
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_audio:
             tmp_path = tmp_audio.name
             
-        cmd = ["edge-tts", "--voice", voice, "--text", clean_text, "--write-media", tmp_path]
+        current_voice = voice
+        if source_audio_path and i in segment_genders:
+            gender = segment_genders[i]
+            if gender == "female":
+                if "Christopher" in voice or "Guy" in voice or "Eric" in voice:
+                    current_voice = "en-US-JennyNeural"
+                elif "Henri" in voice or "Claude" in voice:
+                    current_voice = "fr-FR-VivienneNeural"
+                
+        cmd = ["edge-tts", "--voice", current_voice, "--text", clean_text, "--write-media", tmp_path]
         process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await process.communicate()
         

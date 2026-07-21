@@ -472,8 +472,8 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
                 segments = []
                 
             if segments:
-                # On génère l'audio TTS synchronisé segment par segment
-                await ai_remaster.generate_synced_tts(segments, main_tts_audio, voice="en-US-ChristopherNeural")
+                # On génère l'audio TTS synchronisé segment par segment avec analyse du genre vocal
+                await ai_remaster.generate_synced_tts(segments, main_tts_audio, voice="en-US-ChristopherNeural", source_audio_path=vocals_wav)
                 
             # 5. Generation TTS Descriptive
             if progress_callback: await progress_callback(60)
@@ -592,13 +592,15 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             audio_inputs.append(ffmpeg.input(desc_tts_audio).audio)
             
         if len(audio_inputs) == 3:
-            # Augmentation du volume de la musique de fond (index 0) de 1 à 1.5
-            audio_mix = ffmpeg.filter(audio_inputs, 'amix', inputs=3, weights="1.5 1 0.3", duration='longest')
+            # Musique = 0.2, TTS Principal = 2.0, TTS Descriptif = 0.5
+            audio_mix = ffmpeg.filter(audio_inputs, 'amix', inputs=3, weights="0.2 2.0 0.5", duration='longest')
+            audio_mix = ffmpeg.filter(audio_mix, 'volume', '2.0') # Boost du volume final
         elif len(audio_inputs) == 2:
-            # Augmentation du volume de la musique de fond (index 0)
-            audio_mix = ffmpeg.filter(audio_inputs, 'amix', inputs=2, weights="1.5 1", duration='longest')
+            # Musique = 0.2, TTS Principal = 2.0
+            audio_mix = ffmpeg.filter(audio_inputs, 'amix', inputs=2, weights="0.2 2.0", duration='longest')
+            audio_mix = ffmpeg.filter(audio_mix, 'volume', '2.0') # Boost du volume final
         elif len(audio_inputs) == 1:
-            audio_mix = audio_inputs[0]
+            audio_mix = ffmpeg.filter(audio_inputs[0], 'volume', '2.0')
         else:
             audio_mix = ffmpeg.input(input_path).audio
         
