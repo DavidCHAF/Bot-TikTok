@@ -4,7 +4,7 @@ import cv2
 import easyocr
 
 def test_durations():
-    video_path = "downloads/GmREV8x3dik.mp4"
+    video_path = "downloads/ogC55qKAISc.mp4"
     if not os.path.exists(video_path):
         print("Video not found.")
         return
@@ -27,7 +27,7 @@ def test_durations():
         if not ret: continue
         results = reader.readtext(frame)
         for (bbox, text, prob) in results:
-            if prob > 0.6 and len(text.strip()) >= 3:
+            if prob > 0.3 and len(text.strip()) >= 3:
                 x = min([p[0] for p in bbox])
                 y = min([p[1] for p in bbox])
                 w = max([p[0] for p in bbox]) - x

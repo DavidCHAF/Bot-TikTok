@@ -4,7 +4,7 @@ import sys
 from src.video_processor import download_video, detect_text_zones
 
 async def main():
-    vid_id = "GmREV8x3dik"
+    vid_id = "ogC55qKAISc"
     url = f"https://www.youtube.com/watch?v={vid_id}"
     
     # Download

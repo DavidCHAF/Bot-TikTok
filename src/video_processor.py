@@ -390,9 +390,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 text_raw = '\\N'.join(text_block)
                 
                 if style_type == "hormozi":
-                    # Effet pop-in Hormozi accentué avec un léger tilt alternatif (rotation Z)
-                    tilt = 4 if (i % 4 == 0) else -4
-                    text_ass = f"{{\\frz{tilt}\\fscx50\\fscy50\\t(0,100,\\frz0\\fscx115\\fscy115)\\t(100,150,\\fscx100\\fscy100)}}{text_raw.upper()}"
+                    # Effet pop-in propre : fondu très rapide + scale de 80% -> 110% -> 100% (sans rotation pendulaire)
+                    text_ass = f"{{\\fad(50,50)\\fscx80\\fscy80\\t(0,80,\\fscx110\\fscy110)\\t(80,150,\\fscx100\\fscy100)}}{text_raw.upper()}"
                 else:
                     text_ass = text_raw
                     
@@ -462,6 +461,16 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             write_vtt(segments, main_tts_vtt)
             
             main_script = " ".join([seg['text'] for seg in segments])
+            
+            # Anti-hallucination Whisper: si le texte est microscopique, ou si c'est une phrase typique d'hallucination (YouTube outro)
+            hallucinations = ["thank you for watching", "thanks for watching", "see you in the next video", "amara.org", "sous-titres par"]
+            script_lower = main_script.lower()
+            is_hallucination = any(h in script_lower for h in hallucinations)
+            
+            if len(main_script.strip()) < 10 or is_hallucination:
+                main_script = ""
+                segments = []
+                
             if segments:
                 # On génère l'audio TTS synchronisé segment par segment
                 await ai_remaster.generate_synced_tts(segments, main_tts_audio, voice="en-US-ChristopherNeural")
@@ -480,8 +489,8 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         video = ffmpeg.input(input_path).video
         
         margin_v = 150
-        # Floutage pour textes dynamiques (vrais sous-titres)
-        if has_subtitles and dynamic_zones:
+        # Floutage pour textes dynamiques (vrais sous-titres, ou watermarks récalcitrants)
+        if dynamic_zones:
             for dz in dynamic_zones:
                 box_x = max(0, dz['x'] - 5)
                 box_y = max(0, dz['y'] - 5)

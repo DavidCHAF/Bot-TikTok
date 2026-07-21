@@ -88,9 +88,10 @@ def transcribe_audio_with_timestamps(audio_path: str):
     if not os.path.exists(audio_path):
         return []
         
-    print(f"✍️ [Whisper] Transcription de l'audio (modèle 'tiny' int8)...")
+    print(f"✍️ [Whisper] Transcription de l'audio (modèle 'tiny' int8 + VAD)...")
     model = WhisperModel("tiny", device="cpu", compute_type="int8")
-    segments, info = model.transcribe(audio_path, beam_size=5)
+    # L'activation de vad_filter (Voice Activity Detection) empêche Whisper d'halluciner sur les bruits
+    segments, info = model.transcribe(audio_path, beam_size=5, vad_filter=True, condition_on_previous_text=False)
     
     results = []
     for segment in segments:
