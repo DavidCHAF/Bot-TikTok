@@ -153,20 +153,46 @@ def describe_video_visually(video_path: str) -> list:
         if not images:
             continue
             
-        prompt = "Describe in a funny and humorous way what is happening in this 15-second video segment (1 very short sentence). No introduction, be direct to serve as a comedy background voice-over."
-        try:
-            print(f"👁️ [Gemini Vision] Requête pour le segment {start_time:.1f}s - {end_time:.1f}s...")
-            response = client.models.generate_content(
-                model='gemini-3.5-flash',
-                contents=[prompt] + images
-            )
-            segments.append({
-                'start': start_time,
-                'end': end_time,
-                'text': response.text.strip()
-            })
-        except Exception as e:
-            print(f"❌ [Gemini Vision] Erreur API segment {i}: {e}")
+        prompt = "Describe in a funny and humorous way what is happening in this 15-second video segment (1 very short sentence). CRITICAL: NEVER include introductory phrases like 'Sure, here is a description' or 'In this video'. Output ONLY the raw comedy background voice-over text."
+        
+        fallback_models = [
+            'gemini-3.5-flash', 
+            'gemini-3.5-flash-lite',
+            'gemini-3.6-flash',
+            'gemini-3-flash',
+            'gemini-3.1-flash-lite',
+            'gemini-2.5-flash',
+            'gemini-2.5-flash-lite'
+        ]
+        
+        success = False
+        for model_name in fallback_models:
+            try:
+                print(f"👁️ [Gemini Vision] Requête segment {start_time:.1f}s - {end_time:.1f}s avec le modèle {model_name}...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[prompt] + images
+                )
+                
+                # Nettoyage des hallucinations d'intro typiques des LLMs
+                raw_text = response.text.strip()
+                import re
+                clean_text = re.sub(r'^(?i)(sure[, ]*here is a description|here is a description|in this video[,:]*|here\'s a description)[\s:]*', '', raw_text).strip()
+                
+                segments.append({
+                    'start': start_time,
+                    'end': end_time,
+                    'text': clean_text
+                })
+                success = True
+                break # Succès, on sort de la boucle de fallback
+            except Exception as e:
+                print(f"⚠️ [Gemini Vision] Erreur avec {model_name} : {e}")
+                import time
+                time.sleep(1) # Petite pause avant d'essayer le modèle suivant
+                
+        if not success:
+            print(f"❌ [Gemini Vision] Échec final pour le segment {i}. Tous les modèles ont été tentés.")
             
     cap.release()
     return segments

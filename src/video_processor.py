@@ -634,8 +634,8 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             # On mixe APRÈS le loudnorm pour éviter que le compresseur dynamique ne booste le murmure !
             # amix divise le volume de tous les inputs par 2 (car inputs=2). 
             # On multiplie par 2.0 à la fin pour rétablir le volume du main_mix.
-            # Volume desc = 0.35 / 2 (amix) * 2.0 (boost final) = 0.35 effectif (un peu plus fort mais discret)
-            desc_audio = ffmpeg.input(desc_tts_audio).audio.filter('volume', '0.35')
+            # Volume desc = 0.6 / 2 (amix) * 2.0 (boost final) = 0.6 effectif (un peu plus fort mais discret)
+            desc_audio = ffmpeg.input(desc_tts_audio).audio.filter('volume', '0.6')
             audio_mix = ffmpeg.filter([main_mix, desc_audio], 'amix', inputs=2, duration='longest').filter('volume', '2.0')
         else:
             audio_mix = main_mix
@@ -650,7 +650,8 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             preset='fast',
             maxrate='4M',
             bufsize='8M',
-            shortest=None
+            shortest=None,
+            map_metadata='-1'
         ).overwrite_output().global_args('-nostdin')
         
         process = await asyncio.create_subprocess_exec(
