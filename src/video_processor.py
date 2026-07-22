@@ -471,6 +471,28 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
                 main_script = ""
                 segments = []
                 
+            # Validation croisée: On compare les mots OCR et Whisper
+            if main_script:
+                import re
+                whisper_words = set(re.findall(r'\b\w{3,}\b', script_lower))
+                validated_zones = []
+                for dz in dynamic_zones:
+                    ocr_text_full = " ".join(dz.get('ocr_texts', [])).lower()
+                    ocr_words = set(re.findall(r'\b\w{3,}\b', ocr_text_full))
+                    
+                    if ocr_words and whisper_words:
+                        common = ocr_words.intersection(whisper_words)
+                        # Si l'OCR et Whisper ont au moins 1 mot commun, c'est validé comme vrai sous-titre
+                        if len(common) >= 1:
+                            validated_zones.append(dz)
+                            continue
+                
+                dynamic_zones = validated_zones
+                # Si toutes les zones ont été invalidées (c'était des watermarks), on annule la TTS
+                if not dynamic_zones:
+                    main_script = ""
+                    segments = []
+                
             if segments:
                 # On génère l'audio TTS synchronisé segment par segment avec analyse du genre vocal
                 await ai_remaster.generate_synced_tts(segments, main_tts_audio, voice="en-US-ChristopherNeural", source_audio_path=vocals_wav)
@@ -594,13 +616,13 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         if len(audio_inputs) == 3:
             # Musique = 0.2, TTS Principal = 2.0, TTS Descriptif = 0.5
             audio_mix = ffmpeg.filter(audio_inputs, 'amix', inputs=3, weights="0.2 2.0 0.5", duration='longest')
-            audio_mix = ffmpeg.filter(audio_mix, 'volume', '2.0') # Boost du volume final
+            audio_mix = ffmpeg.filter(audio_mix, 'loudnorm', I=-14, TP=-1.5, LRA=11)
         elif len(audio_inputs) == 2:
             # Musique = 0.2, TTS Principal = 2.0
             audio_mix = ffmpeg.filter(audio_inputs, 'amix', inputs=2, weights="0.2 2.0", duration='longest')
-            audio_mix = ffmpeg.filter(audio_mix, 'volume', '2.0') # Boost du volume final
+            audio_mix = ffmpeg.filter(audio_mix, 'loudnorm', I=-14, TP=-1.5, LRA=11)
         elif len(audio_inputs) == 1:
-            audio_mix = ffmpeg.filter(audio_inputs[0], 'volume', '2.0')
+            audio_mix = ffmpeg.filter(audio_inputs[0], 'loudnorm', I=-14, TP=-1.5, LRA=11)
         else:
             audio_mix = ffmpeg.input(input_path).audio
         
@@ -798,7 +820,8 @@ def detect_text_zones(video_path):
             dynamic_zones.append({
                 'x': min_x, 'y': min_y, 'w': max_x - min_x, 'h': max_y - min_y,
                 'start_t': 0,
-                'end_t': 999
+                'end_t': 999,
+                'ocr_texts': [t['text'] for t in group]
             })
         
     return static_texts, dynamic_zones, len(dynamic_texts_set), width, height
