@@ -104,43 +104,72 @@ def transcribe_audio_with_timestamps(audio_path: str):
     del model
     return results
 
-def describe_video_visually(video_path: str) -> str:
+def describe_video_visually(video_path: str) -> list:
     """
-    Utilise Gemini Vision pour décrire chronologiquement la vidéo.
+    Utilise Gemini Vision pour décrire la vidéo par segments de 15 secondes.
+    Retourne une liste de dicts: [{'start': 0, 'end': 15, 'text': '...'}, ...]
     """
     import cv2
     import PIL.Image
     
     if not api_key or not client:
-        return "Une vidéo très captivante."
+        return [{'start': 0.0, 'end': 15.0, 'text': "Une vidéo très amusante."}]
         
-    print(f"👁️ [Gemini Vision] Analyse visuelle de la vidéo en cours...")
+    print(f"👁️ [Gemini Vision] Analyse visuelle de la vidéo par segments de 15s...")
     cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0: fps = 30.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = total_frames / fps
     
-    frames_to_extract = [int(total_frames * i / 4) for i in range(1, 4)]
-    images = []
+    if duration <= 0:
+        cap.release()
+        return []
+
+    interval = 15.0
+    num_segments = int(duration // interval) + (1 if duration % interval > 0 else 0)
     
-    for frame_idx in frames_to_extract:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = cap.read()
-        if ret:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            pil_img = PIL.Image.fromarray(frame_rgb)
-            images.append(pil_img)
+    segments = []
+    
+    for i in range(num_segments):
+        start_time = i * interval
+        end_time = min((i + 1) * interval, duration)
+        
+        frames_to_extract = [
+            int((start_time + (end_time - start_time) * 0.25) * fps),
+            int((start_time + (end_time - start_time) * 0.50) * fps),
+            int((start_time + (end_time - start_time) * 0.75) * fps)
+        ]
+        
+        images = []
+        for frame_idx in frames_to_extract:
+            if frame_idx >= total_frames: continue
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if ret:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                images.append(PIL.Image.fromarray(frame_rgb))
+                
+        if not images:
+            continue
+            
+        prompt = "Describe in a funny and humorous way what is happening in this 15-second video segment (1 very short sentence). No introduction, be direct to serve as a comedy background voice-over."
+        try:
+            print(f"👁️ [Gemini Vision] Requête pour le segment {start_time:.1f}s - {end_time:.1f}s...")
+            response = client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=[prompt] + images
+            )
+            segments.append({
+                'start': start_time,
+                'end': end_time,
+                'text': response.text.strip()
+            })
+        except Exception as e:
+            print(f"❌ [Gemini Vision] Erreur API segment {i}: {e}")
+            
     cap.release()
-    
-    prompt = "Décris très brièvement ce qu'il se passe dans cette vidéo (1 ou 2 phrases simples). Ne fais aucune introduction, sois direct pour faire une voix-off passive."
-    
-    try:
-        response = client.models.generate_content(
-            model='gemini-3.5-flash',
-            contents=[prompt] + images
-        )
-        return response.text.strip()
-    except Exception as e:
-        print(f"❌ [Gemini Vision] Erreur API: {e}")
-        return ""
+    return segments
 
 async def generate_tts(text: str, output_audio_path: str, output_vtt_path: str, voice: str = "fr-FR-HenriNeural"):
     """

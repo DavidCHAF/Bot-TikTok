@@ -342,7 +342,7 @@ def generate_ass(vtt_path: str, ass_path: str, video_width: int, video_height: i
             # Font Bubblegum, jaune, bordure noire de 4px
             style_def = f"Style: Default,Bubblegum,55,&H0000FFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,2,20,20,{int(margin_v)},1"
         else:
-            style_def = f"Style: Default,Bubblegum,30,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,20,20,20,1"
+            style_def = f"Style: Default,Bubblegum,18,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,20,20,20,1"
             
         ass_content = f"""[Script Info]
 ScriptType: v4.00+
@@ -420,6 +420,7 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         
         main_script = ""
         desc_script = ""
+        desc_segments = []
         vocals_wav = None
         no_vocals_wav = None
         main_tts_audio = None
@@ -427,9 +428,35 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
         desc_tts_audio = None
         desc_tts_vtt = None
         
+        def write_vtt(segments, filepath):
+            def format_time(seconds):
+                hours = int(seconds // 3600)
+                minutes = int((seconds % 3600) // 60)
+                secs = int(seconds % 60)
+                millisecs = int((seconds - int(seconds)) * 1000)
+                return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millisecs:03d}"
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write("WEBVTT\n\n")
+                for i, seg in enumerate(segments):
+                    start = format_time(seg['start'])
+                    end = format_time(seg['end'])
+                    f.write(f"{i+1}\n{start} --> {end}\n{seg['text']}\n\n")
+
+        # 3. Description Gemini Vision (Segments de 15s) pour TOUTES les vidéos
+        if progress_callback: await progress_callback(10) # 10 au lieu de 40 car c'est au début
+        desc_segments = await asyncio.to_thread(ai_remaster.describe_video_visually, input_path)
+        desc_script = " ".join([seg['text'] for seg in desc_segments]) if desc_segments else ""
+        
+        # 5. Generation TTS Descriptive (Synchronisée par segments)
+        if desc_segments:
+            desc_tts_audio = os.path.join(work_dir, f"{basename}_desc_tts.mp3")
+            desc_tts_vtt = os.path.join(work_dir, f"{basename}_desc_tts.vtt")
+            write_vtt(desc_segments, desc_tts_vtt)
+            await ai_remaster.generate_synced_tts(desc_segments, desc_tts_audio, voice="en-US-JennyNeural")
+            
         if has_subtitles:
             # 1. Separation Audio via Local Demucs
-            if progress_callback: await progress_callback(10)
+            if progress_callback: await progress_callback(20)
             vocals_wav, no_vocals_wav = await ai_remaster.separate_audio_local(input_path, work_dir)
             if not vocals_wav:
                 return False
@@ -438,26 +465,8 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             if progress_callback: await progress_callback(30)
             segments = ai_remaster.transcribe_audio_with_timestamps(vocals_wav)
             
-            # 3. Description Gemini Vision (Commenté pour debug)
-            if progress_callback: await progress_callback(40)
-            # desc_script = ai_remaster.describe_video_visually(input_path)
-            
             main_tts_audio = os.path.join(work_dir, f"{basename}_main_tts.mp3")
             main_tts_vtt = os.path.join(work_dir, f"{basename}_main_tts.vtt")
-            def write_vtt(segments, filepath):
-                def format_time(seconds):
-                    hours = int(seconds // 3600)
-                    minutes = int((seconds % 3600) // 60)
-                    secs = int(seconds % 60)
-                    millisecs = int((seconds - int(seconds)) * 1000)
-                    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millisecs:03d}"
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write("WEBVTT\n\n")
-                    for i, seg in enumerate(segments):
-                        start = format_time(seg['start'])
-                        end = format_time(seg['end'])
-                        f.write(f"{i+1}\n{start} --> {end}\n{seg['text']}\n\n")
-            
             write_vtt(segments, main_tts_vtt)
             
             main_script = " ".join([seg['text'] for seg in segments])
@@ -497,12 +506,13 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
                 # On génère l'audio TTS synchronisé segment par segment avec analyse du genre vocal
                 await ai_remaster.generate_synced_tts(segments, main_tts_audio, voice="en-US-ChristopherNeural", source_audio_path=vocals_wav)
                 
-            # 5. Generation TTS Descriptive
+            # 5. Generation TTS Descriptive (Synchronisée par segments)
             if progress_callback: await progress_callback(60)
             desc_tts_audio = os.path.join(work_dir, f"{basename}_desc_tts.mp3")
             desc_tts_vtt = os.path.join(work_dir, f"{basename}_desc_tts.vtt")
-            if desc_script:
-                await ai_remaster.generate_tts(desc_script, desc_tts_audio, desc_tts_vtt, voice="fr-FR-VivienneNeural")
+            if desc_segments:
+                write_vtt(desc_segments, desc_tts_vtt)
+                await ai_remaster.generate_synced_tts(desc_segments, desc_tts_audio, voice="fr-FR-VivienneNeural")
             
         # 6. Assemblage FFmpeg Visuel
         if progress_callback: await progress_callback(70)
@@ -605,26 +615,30 @@ async def remaster_video_full_pipeline(input_path: str, output_path: str, progre
             
         # Mixage Audio
         if progress_callback: await progress_callback(85)
-        audio_inputs = []
+        
+        main_inputs = []
         if no_vocals_wav and os.path.exists(no_vocals_wav):
-            audio_inputs.append(ffmpeg.input(no_vocals_wav).audio)
+            main_inputs.append(ffmpeg.input(no_vocals_wav).audio.filter('volume', '0.4'))
         if main_script and main_tts_audio and os.path.exists(main_tts_audio):
-            audio_inputs.append(ffmpeg.input(main_tts_audio).audio)
-        if desc_script and desc_tts_audio and os.path.exists(desc_tts_audio):
-            audio_inputs.append(ffmpeg.input(desc_tts_audio).audio)
+            main_inputs.append(ffmpeg.input(main_tts_audio).audio.filter('volume', '2.5'))
             
-        if len(audio_inputs) == 3:
-            # Musique = 0.2, TTS Principal = 2.0, TTS Descriptif = 0.5
-            audio_mix = ffmpeg.filter(audio_inputs, 'amix', inputs=3, weights="0.2 2.0 0.5", duration='longest')
-            audio_mix = ffmpeg.filter(audio_mix, 'loudnorm', I=-14, TP=-1.5, LRA=11)
-        elif len(audio_inputs) == 2:
-            # Musique = 0.2, TTS Principal = 2.0
-            audio_mix = ffmpeg.filter(audio_inputs, 'amix', inputs=2, weights="0.2 2.0", duration='longest')
-            audio_mix = ffmpeg.filter(audio_mix, 'loudnorm', I=-14, TP=-1.5, LRA=11)
-        elif len(audio_inputs) == 1:
-            audio_mix = ffmpeg.filter(audio_inputs[0], 'loudnorm', I=-14, TP=-1.5, LRA=11)
+        if len(main_inputs) >= 2:
+            main_mix = ffmpeg.filter(main_inputs, 'amix', inputs=len(main_inputs), duration='longest')
+            main_mix = ffmpeg.filter(main_mix, 'loudnorm', I=-14, TP=-1.5, LRA=11)
+        elif len(main_inputs) == 1:
+            main_mix = ffmpeg.filter(main_inputs[0], 'loudnorm', I=-14, TP=-1.5, LRA=11)
         else:
-            audio_mix = ffmpeg.input(input_path).audio
+            main_mix = ffmpeg.input(input_path).audio
+            
+        if desc_script and desc_tts_audio and os.path.exists(desc_tts_audio):
+            # On mixe APRÈS le loudnorm pour éviter que le compresseur dynamique ne booste le murmure !
+            # amix divise le volume de tous les inputs par 2 (car inputs=2). 
+            # On multiplie par 2.0 à la fin pour rétablir le volume du main_mix.
+            # Volume desc = 0.35 / 2 (amix) * 2.0 (boost final) = 0.35 effectif (un peu plus fort mais discret)
+            desc_audio = ffmpeg.input(desc_tts_audio).audio.filter('volume', '0.35')
+            audio_mix = ffmpeg.filter([main_mix, desc_audio], 'amix', inputs=2, duration='longest').filter('volume', '2.0')
+        else:
+            audio_mix = main_mix
         
         out = ffmpeg.output(
             video, 
